@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Merchemy Scraper – Settings</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hdr">
+      <span class="hdr-logo">⚡ Merchemy Scraper</span>
+      <span class="hdr-sub">Settings</span>
+    </header>
+
+    <main class="main">
+      <!-- Account -->
+      <section class="card">
+        <h2 class="card-title">Account</h2>
+        <div class="user-row" id="user-row-loggedin" style="display:none;">
+          <div class="user-info">
+            <span class="user-avatar">👤</span>
+            <div>
+              <div class="user-email" id="s-user-email">—</div>
+              <div class="user-status">🟢 Signed in</div>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm" id="btn-signout">Sign Out</button>
+        </div>
+        <div class="user-row" id="user-row-loggedout" style="display:none;">
+          <span style="font-size:13px; color: var(--muted);">Not signed in.</span>
+          <button class="btn btn-primary btn-sm" id="btn-goto-login">Sign In</button>
+        </div>
+      </section>
+
+      <!-- API -->
+      <section class="card">
+        <h2 class="card-title">API Configuration</h2>
+        <div class="field">
+          <label for="api-url">API Base URL</label>
+          <input id="api-url" type="text" class="input" placeholder="https://api.vconnect.global/api/v2" />
+          <span class="hint">Leave default unless you run a self-hosted instance.</span>
+        </div>
+        <div id="conn-status" class="conn-status idle">● Not tested</div>
+        <button class="btn btn-outline" id="btn-test">Test Connection</button>
+      </section>
+
+      <!-- Defaults -->
+      <section class="card">
+        <h2 class="card-title">Defaults</h2>
+        <div class="field">
+          <label for="default-store">Default Store Name</label>
+          <input id="default-store" type="text" class="input" placeholder="e.g. MyEtsyShop" />
+          <span class="hint">Pre-fills the store name in the popup.</span>
+        </div>
+        <div class="field">
+          <label for="default-shopid">Default Etsy Shop ID</label>
+          <input id="default-shopid" type="text" class="input" placeholder="e.g. 57646241" />
+          <span class="hint">Numeric ID from the Etsy Shop Manager URL.</span>
+        </div>
+      </section>
+
+      <!-- Save -->
+      <div class="actions">
+        <button class="btn btn-primary" id="btn-save">💾 Save Settings</button>
+        <span class="save-status" id="save-status"></span>
+      </div>
+    </main>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

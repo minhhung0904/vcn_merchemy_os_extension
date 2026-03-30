@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Merchemy OS - Etsy</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <!-- ═══════════════════ LOGIN VIEW ═══════════════════ -->
+  <div class="container" id="view-login">
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">Merchemy<span class="logo-accent"> OS</span></span>
+      </div>
+    </header>
+
+    <div class="login-hero">
+      <p class="login-sub">Sign in to start syncing Etsy orders</p>
+    </div>
+
+    <div class="login-form">
+      <div class="field-group">
+        <label class="label" for="login-email">Email</label>
+        <input type="email" id="login-email" class="input" placeholder="you@example.com" autocomplete="email" />
+      </div>
+      <div class="field-group">
+        <label class="label" for="login-password">Password</label>
+        <div class="input-row">
+          <input type="password" id="login-password" class="input" placeholder="••••••••" autocomplete="current-password" />
+          <button class="btn-eye" id="btn-login-eye" title="Show/hide">👁</button>
+        </div>
+      </div>
+
+      <div class="login-error" id="login-error" style="display:none;"></div>
+
+      <button class="btn btn-primary btn-full" id="btn-login">
+        <span id="btn-login-label">Sign In</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ MAIN VIEW ═══════════════════ -->
+  <div class="container" id="view-main" style="display:none;">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">Merchemy<span class="logo-accent"> Scraper</span></span>
+      </div>
+      <div class="header-right">
+        <span class="user-badge" id="user-badge"></span>
+        <button class="btn-icon" id="btn-logout" title="Sign out">🚪</button>
+      </div>
+    </header>
+
+    <!-- Platform Selector -->
+    <section class="section">
+      <label class="label">Platform</label>
+      <div class="platform-tabs">
+        <button class="platform-tab active" data-platform="etsy">Etsy</button>
+        <button class="platform-tab disabled" data-platform="shopify" title="Coming soon">Shopify</button>
+        <button class="platform-tab disabled" data-platform="amazon" title="Coming soon">Amazon</button>
+      </div>
+    </section>
+
+    <!-- Store Name + Shop ID -->
+    <section class="section row-2col">
+      <div>
+        <label class="label" for="input-store">Store Name</label>
+        <input type="text" id="input-store" class="input" placeholder="e.g. MyEtsyShop" />
+      </div>
+      <div>
+        <label class="label" for="input-shopid">Shop ID <span class="label-hint">(auto)</span></label>
+        <input type="text" id="input-shopid" class="input" placeholder="e.g. 57646241" />
+      </div>
+    </section>
+
+    <!-- Status -->
+    <div class="status-box" id="status-box">
+      <span id="status-icon">🔍</span>
+      <span id="status-text">Ready. Navigate to any Etsy page, then click Fetch Orders.</span>
+    </div>
+
+    <!-- Preview Table -->
+    <div class="preview-section" id="preview-section" style="display:none;">
+      <div class="preview-header">
+        <span id="preview-count">0 orders found</span>
+        <button class="btn-link" id="btn-clear">Clear</button>
+      </div>
+      <div class="table-wrap">
+        <table class="preview-table">
+          <thead>
+            <tr><th>#</th><th>Order ID</th><th>Date</th><th>Customer</th><th>SKU</th><th>Qty</th><th>Total</th></tr>
+          </thead>
+          <tbody id="preview-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button class="btn btn-secondary" id="btn-scrape"><span>📥</span> Fetch Orders</button>
+      <button class="btn btn-primary" id="btn-push" disabled><span>🚀</span> Push to Merchemy</button>
+    </div>
+
+    <!-- Progress Bar -->
+    <div class="progress-wrap" id="progress-wrap" style="display:none;">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <span class="progress-label" id="progress-label">0%</span>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span id="api-status">🟢 Connected</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
