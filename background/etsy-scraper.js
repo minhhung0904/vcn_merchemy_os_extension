@@ -26,6 +26,9 @@ export async function scrapeEtsyOrders(shopId, storeName, orderStateId = '') {
   let hasMore = search.orders && search.orders.length === DEFAULT_LIMIT;
 
   while (hasMore) {
+    // Random delay (1.5s - 3.5s) to mimic human behavior
+    await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 2000) + 1500));
+
     const page = await fetchOrderPage(shopId, offset, DEFAULT_LIMIT, orderStateId, csrfToken);
     const ps = page?.orders_search;
     if (!ps || !ps.orders || ps.orders.length === 0) break;
