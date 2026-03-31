@@ -2,11 +2,14 @@
 
 let scrapedOrders = [];
 let currentUser = null;
+let tempAuthToken = null;
+let tempAuthEmail = null;
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
   bindLoginEvents();
+  bindOrgEvents();
   bindMainEvents();
   checkAuth();
 });
@@ -20,7 +23,7 @@ async function checkAuth() {
     currentUser = userEmail;
     showView("main");
     loadMainPrefs();
-    autoDetectShopId();
+    forceDetectShopInfo(true);
   } else {
     showView("login");
   }
@@ -31,6 +34,8 @@ async function checkAuth() {
 function showView(name) {
   document.getElementById("view-login").style.display =
     name === "login" ? "flex" : "none";
+  document.getElementById("view-org").style.display =
+    name === "org" ? "flex" : "none";
   document.getElementById("view-main").style.display =
     name === "main" ? "flex" : "none";
 
@@ -79,8 +84,7 @@ function bindLoginEvents() {
     try {
       const { apiUrl } = await storage.get(["apiUrl"]);
 
-      const url =
-        (apiUrl || "https://api.vconnect.global/api/v2") + "/auth/login";
+      const url = (apiUrl || "http://localhost:3000/api/v2") + "/auth/login";
 
       const res = await fetch(url, {
         method: "POST",
@@ -97,23 +101,36 @@ function bindLoginEvents() {
       }
 
       // Might require org selection for multi-org accounts
-      if (data.needsOrgSelection && data.organizations?.length > 0) {
+      if (data.tempToken && data.organizations?.length > 1) {
+        tempAuthToken = data.tempToken;
+        tempAuthEmail = data.user?.email || email;
+        const selectEl = document.getElementById("org-select");
+        selectEl.innerHTML = "";
+        data.organizations.forEach((org) => {
+          const opt = document.createElement("option");
+          opt.value = org.id;
+          opt.textContent = org.name;
+          selectEl.appendChild(opt);
+        });
+        showView("org");
+        return; // Pause login flow until org is selected
+      } else if (data.tempToken && data.organizations?.length === 1) {
         // Auto-select first org
         const orgRes = await fetch(
-          (apiUrl || "https://api.vconnect.global/api/v2") +
+          (apiUrl || "http://localhost:3000/api/v2") +
             "/auth/select-organization",
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${data.token}`,
+              Authorization: `Bearer ${data.tempToken}`,
             },
             body: JSON.stringify({ organizationId: data.organizations[0].id }),
           },
         );
         const orgData = await orgRes.json().catch(() => ({}));
         if (orgRes.ok && orgData.token) {
-          await saveAuth(orgData.token, orgData.user?.email || email);
+          await saveAuth(orgData.token, orgData.user?.email || data.user?.email || email);
         } else {
           throw new Error(orgData.error || "Organization selection failed.");
         }
@@ -126,11 +143,68 @@ function bindLoginEvents() {
       currentUser = email;
       showView("main");
       loadMainPrefs();
-      autoDetectShopId();
+      forceDetectShopInfo(true);
     } catch (err) {
       showLoginError(err.message);
     } finally {
       setLoginLoading(false);
+    }
+  });
+}
+
+function bindOrgEvents() {
+  const btnSelect = document.getElementById("btn-org-select");
+  const btnCancel = document.getElementById("btn-org-cancel");
+  const selectEl = document.getElementById("org-select");
+  const errEl = document.getElementById("org-error");
+
+  btnCancel.addEventListener("click", () => {
+    tempAuthToken = null;
+    tempAuthEmail = null;
+    showView("login");
+  });
+
+  btnSelect.addEventListener("click", async () => {
+    errEl.style.display = "none";
+    const orgId = selectEl.value;
+    if (!orgId) return;
+
+    btnSelect.disabled = true;
+    document.getElementById("btn-org-label").textContent = "Continuing...";
+
+    try {
+      const { apiUrl } = await storage.get(["apiUrl"]);
+      const orgRes = await fetch(
+        (apiUrl || "http://localhost:3000/api/v2") + "/auth/select-organization",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tempAuthToken}`,
+          },
+          body: JSON.stringify({ organizationId: parseInt(orgId, 10) }),
+        },
+      );
+      
+      const orgData = await orgRes.json().catch(() => ({}));
+      if (orgRes.ok && orgData.token) {
+        await saveAuth(orgData.token, orgData.user?.email || tempAuthEmail);
+        currentUser = tempAuthEmail;
+        tempAuthToken = null;
+        tempAuthEmail = null;
+        
+        showView("main");
+        loadMainPrefs();
+        forceDetectShopInfo(true);
+      } else {
+        throw new Error(orgData.error || "Organization selection failed.");
+      }
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = "block";
+    } finally {
+      btnSelect.disabled = false;
+      document.getElementById("btn-org-label").textContent = "Continue";
     }
   });
 }
@@ -173,35 +247,116 @@ async function loadMainPrefs() {
   if (shopId) getEl("input-shopid").value = shopId;
 }
 
-async function autoDetectShopId() {
-  if (getEl("input-shopid").value) return;
+async function forceDetectShopInfo(silent = false) {
   try {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    if (!tab?.url?.includes("etsy.com")) return;
+    const res = await fetch("https://www.etsy.com/your/shops/me/dashboard", { credentials: "include" });
+    const html = await res.text();
+    
+    let shopId = "";
+    let storeName = "";
+    
+    // Attempt parsing globals
+    const globalMatch = html.match(/window\.__page_globals\s*=\s*({.*?});/s);
+    if (globalMatch) {
+      try {
+        const globals = JSON.parse(globalMatch[1]);
+        if (globals.shop_id) shopId = String(globals.shop_id);
+        if (globals.business_id) shopId = String(globals.business_id);
+        if (globals.shop_name) storeName = String(globals.shop_name);
+      } catch (e) {}
+    }
+    
+    if (!shopId) {
+      const idMatch = html.match(/"shop_id"\s*:\s*(\d+)/) || html.match(/"business_id"\s*:\s*(\d+)/);
+      if (idMatch) shopId = idMatch[1];
+    }
+    if (!storeName) {
+      const nameMatch = html.match(/"shop_name"\s*:\s*"([^"]+)"/);
+      if (nameMatch) storeName = nameMatch[1];
+    }
+    
+    if (shopId) {
+      getEl("input-shopid").value = shopId;
+      storage.set({ shopId });
+    }
+    if (storeName) {
+      getEl("input-store").value = storeName;
+      storage.set({ defaultStore: storeName });
+    }
+    
+    if (!silent) {
+      if (shopId && storeName) {
+        setStatus("success", "✅", `Detected: ${storeName} (${shopId})`, true);
+      } else if (shopId) {
+        setStatus("success", "✅", `Detected Shop ID: ${shopId}`, true);
+      } else {
+        autoDetectShopIdActiveTab();
+      }
+    }
+  } catch (err) {
+    if (!silent) autoDetectShopIdActiveTab();
+  }
+}
+
+async function autoDetectShopIdActiveTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url?.includes("etsy.com")) {
+      setStatus("error", "❌", "Cannot detect. Please log into Etsy first.", true);
+      return;
+    }
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
+        let shopId = "";
+        let storeName = "";
         for (const s of document.querySelectorAll("script")) {
-          const m = s.textContent.match(/"business_id"\s*:\s*(\d+)/);
-          if (m) return m[1];
+          const idM = s.textContent.match(/"business_id"\s*:\s*(\d+)/) || s.textContent.match(/"shop_id"\s*:\s*(\d+)/);
+          if (idM) shopId = idM[1];
+          const nameM = s.textContent.match(/"shop_name"\s*:\s*"([^"]+)"/);
+          if (nameM) storeName = nameM[1];
         }
-        const m = window.location.href.match(/\/shop\/(\d+)\//);
-        return m ? m[1] : "";
+        if (!shopId) {
+          const m = window.location.href.match(/\/shop\/(\d+)\//);
+          if (m) shopId = m[1];
+        }
+        return { shopId, storeName };
       },
     });
-    if (result?.result) getEl("input-shopid").value = result.result;
-  } catch (_) {}
+    
+    if (result?.result) {
+      const { shopId, storeName } = result.result;
+      if (shopId) {
+        getEl("input-shopid").value = shopId;
+        storage.set({ shopId });
+      }
+      if (storeName) {
+        getEl("input-store").value = storeName;
+        storage.set({ defaultStore: storeName });
+      }
+      if (shopId || storeName) {
+        setStatus("success", "✅", `Detected from tab: ${storeName || "Unknown"} (${shopId || "Unknown"})`, true);
+      } else {
+        setStatus("error", "❌", "Could not find shop info on this page.", true);
+      }
+    }
+  } catch (err) {
+    setStatus("error", "❌", "Failed to detect shop info.", true);
+  }
 }
 
-// ─── Main events ──────────────────────────────────────────────────────────────
+// ─── View switching ──────────────────────────────────────────────────────────────
 
 function bindMainEvents() {
   getEl("btn-scrape").addEventListener("click", onScrape);
   getEl("btn-push").addEventListener("click", onPush);
   getEl("btn-clear").addEventListener("click", clearPreview);
+  getEl("btn-detect-shop").addEventListener("click", async () => {
+    const btn = getEl("btn-detect-shop");
+    btn.textContent = "Detecting...";
+    await forceDetectShopInfo(false);
+    btn.textContent = "Auto Detect";
+  });
 
   // Persist shop ID
   getEl("input-shopid").addEventListener("change", () => {
@@ -210,6 +365,90 @@ function bindMainEvents() {
   getEl("input-store").addEventListener("change", () => {
     storage.set({ defaultStore: getEl("input-store").value.trim() });
   });
+
+  // Persist auto-sync setting
+  const toggleAutoSync = getEl("toggle-autosync");
+  const btnSaveSync = getEl("btn-save-sync");
+  const optionsDiv = getEl("autosync-options");
+  const modeSelect = getEl("sync-mode");
+  const hoursInput = getEl("sync-hours");
+  const timeWrap = getEl("sync-time-wrap");
+  const hoursWrap = getEl("sync-hours-wrap");
+
+  // Time selections
+  const th = getEl("sync-time-h"), tm = getEl("sync-time-m"), tampm = getEl("sync-time-ampm");
+  const sh = getEl("sync-start-h"), sm = getEl("sync-start-m"), sampm = getEl("sync-start-ampm");
+
+  const to24h = (hStr, mStr, ampm) => {
+    let h = parseInt(hStr, 10);
+    if (ampm === "PM" && h !== 12) h += 12;
+    if (ampm === "AM" && h === 12) h = 0;
+    return `${h.toString().padStart(2, '0')}:${mStr}`;
+  };
+
+  const from24h = (str24) => {
+    if (!str24) return { h: "12", m: "00", ampm: "AM" };
+    const [hh, mm] = str24.split(":");
+    let hNum = parseInt(hh, 10);
+    let ampm = "AM";
+    if (hNum >= 12) {
+      if (hNum > 12) hNum -= 12;
+      ampm = "PM";
+    }
+    if (hNum === 0) hNum = 12;
+    return { h: hNum.toString(), m: mm, ampm };
+  };
+
+  if (toggleAutoSync) {
+    storage.get(["autoSyncEnabled", "syncMode", "syncTime", "syncHours", "syncStartTime"]).then((res) => {
+      toggleAutoSync.checked = res.autoSyncEnabled !== false;
+      modeSelect.value = res.syncMode || "daily";
+      hoursInput.value = res.syncHours || "4";
+
+      const tTime = from24h(res.syncTime || "00:00");
+      th.value = tTime.h; tm.value = tTime.m; tampm.value = tTime.ampm;
+
+      const sTime = from24h(res.syncStartTime || "00:00");
+      sh.value = sTime.h; sm.value = sTime.m; sampm.value = sTime.ampm;
+
+      updateSyncUI();
+    });
+
+    function updateSyncUI() {
+      optionsDiv.style.display = toggleAutoSync.checked ? "flex" : "none";
+      if (modeSelect.value === "daily") {
+        timeWrap.style.display = "flex";
+        hoursWrap.style.display = "none";
+      } else {
+        timeWrap.style.display = "none";
+        hoursWrap.style.display = "flex";
+      }
+    }
+
+    function saveSyncConfig() {
+      const p = storage.set({
+        autoSyncEnabled: toggleAutoSync.checked,
+        syncMode: modeSelect.value,
+        syncTime: to24h(th.value, tm.value, tampm.value),
+        syncHours: parseInt(hoursInput.value, 10) || 4,
+        syncStartTime: to24h(sh.value, sm.value, sampm.value)
+      }).then(() => {
+        chrome.runtime.sendMessage({ type: "UPDATE_ALARM" }).catch(() => {});
+      });
+      return p;
+    }
+
+    toggleAutoSync.addEventListener("change", updateSyncUI);
+    modeSelect.addEventListener("change", updateSyncUI);
+    
+    btnSaveSync.addEventListener("click", () => {
+      btnSaveSync.textContent = "Saving...";
+      saveSyncConfig().then(() => {
+        setTimeout(() => { btnSaveSync.textContent = "Save Settings"; }, 1000);
+        setStatus("success", "✅", "Auto-sync settings strictly scheduled.", true);
+      });
+    });
+  }
 
   // Platform tabs
   document.querySelectorAll(".platform-tab:not(.disabled)").forEach((tab) => {
@@ -249,7 +488,7 @@ async function onScrape() {
     });
 
     if (!tab?.url?.includes("etsy.com")) {
-      setStatus("error", "❌", "Please navigate to any Etsy page first.");
+      setStatus("error", "❌", "Please navigate to any Etsy page first.", true);
       return;
     }
 
@@ -274,7 +513,7 @@ async function onScrape() {
     scrapedOrders = response.orders;
 
     if (scrapedOrders.length === 0) {
-      setStatus("error", "⚠️", "No open orders found for this shop.");
+      setStatus("error", "⚠️", "No open orders found for this shop.", true);
       return;
     }
 
@@ -283,10 +522,11 @@ async function onScrape() {
       "success",
       "✅",
       `${scrapedOrders.length} / ${response.total} orders fetched.`,
+      true
     );
     getEl("btn-push").disabled = false;
   } catch (err) {
-    setStatus("error", "❌", `Error: ${err.message}`);
+    setStatus("error", "❌", `Error: ${err.message}`, true);
   } finally {
     getEl("btn-scrape").disabled = false;
     hideProgress();
@@ -316,6 +556,7 @@ async function onPush() {
           "success",
           "🎉",
           `Pushed ${response.result.pushed} orders to Merchemy OS!`,
+          true
         );
         scrapedOrders = [];
         clearPreview();
@@ -325,6 +566,7 @@ async function onPush() {
           "error",
           "❌",
           `Push failed: ${response?.error || "Unknown error"}`,
+          true
         );
         getEl("btn-push").disabled = false;
       }
@@ -373,11 +615,24 @@ function clearPreview() {
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────
 
-function setStatus(type, icon, text) {
+let statusTimeout = null;
+
+function setStatus(type, icon, text, autoClear = false) {
   const box = getEl("status-box");
   box.className = "status-box " + (type !== "info" ? type : "");
   getEl("status-icon").textContent = icon;
   getEl("status-text").textContent = text;
+  
+  if (statusTimeout) {
+    clearTimeout(statusTimeout);
+    statusTimeout = null;
+  }
+  
+  if (autoClear) {
+    statusTimeout = setTimeout(() => {
+      setStatus("info", "🔍", "Ready. Navigate to any Etsy page, then click Fetch Orders.");
+    }, 3000);
+  }
 }
 
 function showProgress() {

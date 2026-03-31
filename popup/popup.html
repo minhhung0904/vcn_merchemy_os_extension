@@ -41,6 +41,36 @@
     </div>
   </div>
 
+  <!-- ═══════════════════ ORG SELECT VIEW ═══════════════════ -->
+  <div class="container" id="view-org" style="display:none;">
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">Merchemy<span class="logo-accent"> OS</span></span>
+      </div>
+    </header>
+
+    <div class="login-hero">
+      <p class="login-sub">Select your organization to continue</p>
+    </div>
+
+    <div class="login-form">
+      <div class="field-group">
+        <label class="label" for="org-select">Organization</label>
+        <select id="org-select" class="input"></select>
+      </div>
+
+      <div class="login-error" id="org-error" style="display:none;"></div>
+
+      <button class="btn btn-primary btn-full" id="btn-org-select">
+        <span id="btn-org-label">Continue</span>
+      </button>
+      <button class="btn btn-secondary btn-full" style="margin-top: 10px;" id="btn-org-cancel">
+        Cancel
+      </button>
+    </div>
+  </div>
+
   <!-- ═══════════════════ MAIN VIEW ═══════════════════ -->
   <div class="container" id="view-main" style="display:none;">
     <!-- Header -->
@@ -60,20 +90,74 @@
       <label class="label">Platform</label>
       <div class="platform-tabs">
         <button class="platform-tab active" data-platform="etsy">Etsy</button>
-        <button class="platform-tab disabled" data-platform="shopify" title="Coming soon">Shopify</button>
-        <button class="platform-tab disabled" data-platform="amazon" title="Coming soon">Amazon</button>
+        <button class="platform-tab disabled" data-platform="other" title="Coming soon">Other Platforms <br> Comming soon...</button>
+      </div>
+    </section>
+    
+    <!-- Store Name + Shop ID -->
+    <section class="section">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <label class="label" style="margin-bottom: 0;">Etsy Store Info</label>
+        <button id="btn-detect-shop" class="btn-link" style="font-size: 12px; padding: 0;">Auto Detect</button>
+      </div>
+      <div class="row-2col">
+        <input type="text" id="input-store" class="input" placeholder="Store Name" title="Store Name" />
+        <input type="text" id="input-shopid" class="input" placeholder="Shop ID" title="Shop ID" />
       </div>
     </section>
 
-    <!-- Store Name + Shop ID -->
-    <section class="section row-2col">
-      <div>
-        <label class="label" for="input-store">Store Name</label>
-        <input type="text" id="input-store" class="input" placeholder="e.g. MyEtsyShop" />
+    <!-- Auto Sync Settings -->
+    <section class="section">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="toggle-autosync" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
+          <label class="label" for="toggle-autosync" style="margin-bottom: 0; cursor: pointer; font-weight: 500;">Enable Auto-Sync</label>
+        </div>
+        <button id="btn-save-sync" class="btn btn-primary" style="padding: 4px 12px; font-size: 11px;">Save Settings</button>
       </div>
-      <div>
-        <label class="label" for="input-shopid">Shop ID <span class="label-hint">(auto)</span></label>
-        <input type="text" id="input-shopid" class="input" placeholder="e.g. 57646241" />
+      
+      <div id="autosync-options" style="display: none; padding-left: 24px; gap: 8px; flex-direction: column;">
+        <div>
+          <label class="label" for="sync-mode" style="margin-bottom: 4px;">Frequency</label>
+          <select id="sync-mode" class="input">
+            <option value="daily">Daily at specific time</option>
+            <option value="hourly">Every N hours</option>
+          </select>
+        </div>
+        
+        <div id="sync-time-wrap" style="display: flex; gap: 4px; align-items: center;">
+          <label class="label" style="margin-bottom: 0; width: 60px;">Time:</label>
+          <select id="sync-time-h" class="input" style="width: 50px; padding: 4px;">
+            <option value="1">01</option><option value="2">02</option><option value="3">03</option><option value="4">04</option><option value="5">05</option><option value="6">06</option><option value="7">07</option><option value="8">08</option><option value="9">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option>
+          </select>
+          <span>:</span>
+          <select id="sync-time-m" class="input" style="width: 50px; padding: 4px;">
+            <option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option>
+          </select>
+          <select id="sync-time-ampm" class="input" style="width: 60px; padding: 4px;">
+            <option value="AM">AM</option><option value="PM">PM</option>
+          </select>
+        </div>
+        
+        <div id="sync-hours-wrap" style="display: none; flex-direction: column; gap: 8px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <label class="label" for="sync-hours" style="margin-bottom: 0; width: 60px;">Hours:</label>
+            <input type="number" id="sync-hours" class="input" style="width: 60px;" value="4" min="1" max="24" />
+          </div>
+          <div style="display: flex; gap: 4px; align-items: center;">
+            <label class="label" style="margin-bottom: 0; width: 60px;">Start at:</label>
+            <select id="sync-start-h" class="input" style="width: 50px; padding: 4px;">
+              <option value="1">01</option><option value="2">02</option><option value="3">03</option><option value="4">04</option><option value="5">05</option><option value="6">06</option><option value="7">07</option><option value="8">08</option><option value="9">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option>
+            </select>
+            <span>:</span>
+            <select id="sync-start-m" class="input" style="width: 50px; padding: 4px;">
+              <option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option>
+            </select>
+            <select id="sync-start-ampm" class="input" style="width: 60px; padding: 4px;">
+              <option value="AM">AM</option><option value="PM">PM</option>
+            </select>
+          </div>
+        </div>
       </div>
     </section>
 

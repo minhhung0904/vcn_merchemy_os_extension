@@ -99,15 +99,6 @@ The content script runs **inside the Etsy tab** so your session cookies are auto
 
 ---
 
-## ➕ Adding More Platforms
-
-To add Shopify or Amazon:
-1. Create `content/shopify.js` with the same message listener (`SCRAPE_ORDERS`)
-2. Add host permissions in `manifest.json`
-3. Add the content script entry in `manifest.json`
-4. Enable the platform tab in `popup.html` (remove `disabled` class)
-
----
 
 ## ⚠️ Notes
 

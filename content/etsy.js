@@ -7,12 +7,15 @@
 (function () {
   'use strict';
 
+  if (window.__merchemyEtsyScraperLoaded) return;
+  window.__merchemyEtsyScraperLoaded = true;
+
   // ─── Constants ───────────────────────────────────────────────────────────────
 
   const MISSION_CONTROL_BASE =
     'https://www.etsy.com/api/v3/ajax/bespoke/shop';
 
-  const DEFAULT_LIMIT = 100; // Etsy allows up to 100 per page
+  const DEFAULT_LIMIT = 50; // Etsy allows up to 100 per page
   const DEFAULT_ORDER_STATE = ''; // empty = all states
 
   // ─── Get Shop (Business) ID ───────────────────────────────────────────────────
@@ -357,27 +360,28 @@
 
       // 3. Paginate if there are more orders
       let offset = search.orders?.length || 0;
+      let hasMore = search.orders && search.orders.length === DEFAULT_LIMIT;
 
-      while (offset < totalCount) {
+      while (hasMore) {
         const page = await fetchOrderPage(shopId, offset, DEFAULT_LIMIT, message.orderStateId || '');
         const ps = page?.orders_search;
-        if (!ps) break;
+        if (!ps || !ps.orders || ps.orders.length === 0) break;
 
         const pageBuyerMap = buildBuyerMap(ps.buyers || []);
-        const pageMapped = (ps.orders || []).map(o =>
+        const pageMapped = ps.orders.map(o =>
           mapOrder(o, pageBuyerMap, message.storeName)
         );
         allMapped = allMapped.concat(pageMapped);
-        offset += ps.orders?.length || 0;
+        offset += ps.orders.length;
 
         // Progress notification
         chrome.runtime.sendMessage({
           type: 'FETCH_PROGRESS',
           fetched: allMapped.length,
-          total: totalCount,
+          total: Math.max(totalCount, allMapped.length),
         }).catch(() => {});
 
-        if (!ps.orders?.length) break;
+        if (ps.orders.length < DEFAULT_LIMIT) break;
       }
 
       sendResponse({

@@ -1,9 +1,18 @@
 // background.js — Service Worker
 // Handles API communication with Merchemy OS backend
 
-const DEFAULT_API_URL = "https://api.vconnect.global/api/v2";
+import { scrapeEtsyOrders } from './background/etsy-scraper.js';
+
+
+const DEFAULT_API_URL = "http://localhost:3000/api/v2";
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "UPDATE_ALARM") {
+    setupSyncAlarm();
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (message.type === "PUSH_ORDERS") {
     handlePushOrders(message.orders)
       .then((result) => sendResponse({ ok: true, result }))
@@ -81,3 +90,92 @@ function getSettings() {
     });
   });
 }
+
+// ─── Auto-Sync (Custom Schedule) ────────────────────────────────────────────────
+
+chrome.runtime.onInstalled.addListener(() => {
+  setupSyncAlarm();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  setupSyncAlarm();
+});
+
+async function setupSyncAlarm() {
+  const { autoSyncEnabled, syncMode, syncTime, syncHours, syncStartTime } = await new Promise((res) => chrome.storage.local.get(["autoSyncEnabled", "syncMode", "syncTime", "syncHours", "syncStartTime"], res));
+  
+  await chrome.alarms.clear("autoSync");
+  await chrome.alarms.clear("midnightSync"); // cleanup old
+  
+  if (autoSyncEnabled === false) {
+    console.log("[Auto-Sync] Disabled by user.");
+    return;
+  }
+  
+  const mode = syncMode || "daily";
+  
+  if (mode === "hourly") {
+    const hours = parseInt(syncHours || 4, 10);
+    const startStr = syncStartTime || "00:00";
+    const [hh, mm] = startStr.split(":").map(Number);
+    const now = new Date();
+    
+    let nextRun = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    
+    // Fast-forward nextRun to the imminent future occurrence
+    while (nextRun.getTime() <= now.getTime()) {
+      nextRun.setTime(nextRun.getTime() + hours * 60 * 60 * 1000);
+    }
+    
+    chrome.alarms.create("autoSync", {
+      when: nextRun.getTime(),
+      periodInMinutes: hours * 60
+    });
+    console.log(`[Auto-Sync] Created periodic alarm for every ${hours} hours starting at ${nextRun.toLocaleString()}.`);
+  } else {
+    const timeStr = syncTime || "00:00";
+    const [hh, mm] = timeStr.split(":").map(Number);
+    
+    // Calculate next run time
+    const now = new Date();
+    let nextRun = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    
+    if (nextRun.getTime() <= now.getTime()) {
+      nextRun.setDate(nextRun.getDate() + 1);
+    }
+    
+    chrome.alarms.create("autoSync", {
+      when: nextRun.getTime(),
+      periodInMinutes: 1440 // 24 hours
+    });
+    console.log(`[Auto-Sync] Created daily alarm for ${nextRun.toLocaleString()} (${timeStr})`);
+  }
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === "autoSync" || alarm.name === "midnightSync") {
+    console.log("[Auto-Sync] Firing sync alarm...");
+    const { shopId, defaultStore, autoSyncEnabled } = await new Promise((res) => chrome.storage.local.get(["shopId", "defaultStore", "autoSyncEnabled"], res));
+    
+    if (autoSyncEnabled === false) {
+      console.log("[Auto-Sync] Aborted. Auto-sync is disabled by user.");
+      return;
+    }
+
+    if (!shopId) {
+      console.log("[Auto-Sync] Aborted. No shopId stored in extension.");
+      return;
+    }
+    
+    try {
+      const orders = await scrapeEtsyOrders(shopId, defaultStore || "Etsy Shop");
+      console.log(`[Auto-Sync] Successfully scraped ${orders.length} orders. Pushing...`);
+      if (orders.length > 0) {
+        const result = await handlePushOrders(orders);
+        console.log(`[Auto-Sync] Successfully pushed ${result.pushed} orders to Merchemy OS.`);
+      }
+    } catch (err) {
+      console.error("[Auto-Sync] Error during background sync:", err);
+    }
+  }
+});
