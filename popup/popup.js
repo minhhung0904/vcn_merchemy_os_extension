@@ -4,6 +4,7 @@ let scrapedOrders = [];
 let currentUser = null;
 let tempAuthToken = null;
 let tempAuthEmail = null;
+let lastSavedSettings = {};
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,11 @@ function showView(name) {
   if (name === "main" && currentUser) {
     const badge = document.getElementById("user-badge");
     if (badge) badge.textContent = currentUser;
+    
+    storage.get(["activeOrgName"]).then(res => {
+      const orgBadge = document.getElementById("org-badge");
+      if (orgBadge) orgBadge.textContent = res.activeOrgName || "No Organization";
+    });
   }
 }
 
@@ -104,6 +110,13 @@ function bindLoginEvents() {
       if (data.tempToken && data.organizations?.length > 1) {
         tempAuthToken = data.tempToken;
         tempAuthEmail = data.user?.email || email;
+        
+        // Persist for switching later
+        await storage.set({ 
+          tempAuthToken: data.tempToken, 
+          organizations: data.organizations 
+        });
+
         const selectEl = document.getElementById("org-select");
         selectEl.innerHTML = "";
         data.organizations.forEach((org) => {
@@ -130,12 +143,12 @@ function bindLoginEvents() {
         );
         const orgData = await orgRes.json().catch(() => ({}));
         if (orgRes.ok && orgData.token) {
-          await saveAuth(orgData.token, orgData.user?.email || data.user?.email || email);
+          await saveAuth(orgData.token, orgData.user?.email || data.user?.email || email, data.organizations[0].name);
         } else {
           throw new Error(orgData.error || "Organization selection failed.");
         }
       } else if (data.token) {
-        await saveAuth(data.token, data.user?.email || email);
+        await saveAuth(data.token, data.user?.email || email, "Personal");
       } else {
         throw new Error("No token received from server.");
       }
@@ -158,10 +171,15 @@ function bindOrgEvents() {
   const selectEl = document.getElementById("org-select");
   const errEl = document.getElementById("org-error");
 
-  btnCancel.addEventListener("click", () => {
-    tempAuthToken = null;
-    tempAuthEmail = null;
-    showView("login");
+  btnCancel.addEventListener("click", async () => {
+    const { authToken } = await storage.get(["authToken"]);
+    if (authToken) {
+      showView("main");
+    } else {
+      tempAuthToken = null;
+      tempAuthEmail = null;
+      showView("login");
+    }
   });
 
   btnSelect.addEventListener("click", async () => {
@@ -188,7 +206,8 @@ function bindOrgEvents() {
       
       const orgData = await orgRes.json().catch(() => ({}));
       if (orgRes.ok && orgData.token) {
-        await saveAuth(orgData.token, orgData.user?.email || tempAuthEmail);
+        const orgName = selectEl.options[selectEl.selectedIndex].text;
+        await saveAuth(orgData.token, orgData.user?.email || tempAuthEmail, orgName);
         currentUser = tempAuthEmail;
         tempAuthToken = null;
         tempAuthEmail = null;
@@ -222,14 +241,24 @@ function setLoginLoading(on) {
   lbl.textContent = on ? "Signing in…" : "Sign In";
 }
 
-async function saveAuth(token, email) {
-  await storage.set({ authToken: token, userEmail: email });
+async function saveAuth(token, email, orgName) {
+  await storage.set({ 
+    authToken: token, 
+    userEmail: email,
+    activeOrgName: orgName 
+  });
 }
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
 
 document.getElementById("btn-logout").addEventListener("click", async () => {
-  await storage.set({ authToken: "", userEmail: "" });
+  await storage.set({ 
+    authToken: "", 
+    userEmail: "", 
+    activeOrgName: "",
+    organizations: [],
+    tempAuthToken: ""
+  });
   currentUser = null;
   scrapedOrders = [];
   clearPreview();
@@ -358,6 +387,25 @@ function bindMainEvents() {
     btn.textContent = "Auto Detect";
   });
 
+  // Switch organization
+  getEl("btn-switch-org").addEventListener("click", async () => {
+    const { organizations, tempAuthToken: storedTempToken } = await storage.get(["organizations", "tempAuthToken"]);
+    if (organizations && organizations.length > 0) {
+      tempAuthToken = storedTempToken;
+      const selectEl = document.getElementById("org-select");
+      selectEl.innerHTML = "";
+      organizations.forEach((org) => {
+        const opt = document.createElement("option");
+        opt.value = org.id;
+        opt.textContent = org.name;
+        selectEl.appendChild(opt);
+      });
+      showView("org");
+    } else {
+      setStatus("error", "❌", "No other organizations found. Please re-login.", true);
+    }
+  });
+
   // Persist shop ID
   getEl("input-shopid").addEventListener("change", () => {
     storage.set({ shopId: getEl("input-shopid").value.trim() });
@@ -376,27 +424,41 @@ function bindMainEvents() {
   const hoursWrap = getEl("sync-hours-wrap");
 
   // Time selections
-  const th = getEl("sync-time-h"), tm = getEl("sync-time-m"), tampm = getEl("sync-time-ampm");
-  const sh = getEl("sync-start-h"), sm = getEl("sync-start-m"), sampm = getEl("sync-start-ampm");
+  const th = getEl("sync-time-h"), tm = getEl("sync-time-m");
+  const sh = getEl("sync-start-h"), sm = getEl("sync-start-m");
 
-  const to24h = (hStr, mStr, ampm) => {
-    let h = parseInt(hStr, 10);
-    if (ampm === "PM" && h !== 12) h += 12;
-    if (ampm === "AM" && h === 12) h = 0;
-    return `${h.toString().padStart(2, '0')}:${mStr}`;
+  // Populate hour selects 00-23
+  [th, sh].forEach(sel => {
+    sel.innerHTML = "";
+    for (let i = 0; i < 24; i++) {
+      const opt = document.createElement("option");
+      const val = i.toString();
+      opt.value = val;
+      opt.textContent = i.toString().padStart(2, "0");
+      sel.appendChild(opt);
+    }
+  });
+
+  // Populate minute selects 00-59
+  [tm, sm].forEach(sel => {
+    sel.innerHTML = "";
+    for (let i = 0; i < 60; i++) {
+      const opt = document.createElement("option");
+      const val = i.toString().padStart(2, "0");
+      opt.value = val;
+      opt.textContent = val;
+      sel.appendChild(opt);
+    }
+  });
+
+  const to24h = (h, m) => {
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   };
 
   const from24h = (str24) => {
-    if (!str24) return { h: "12", m: "00", ampm: "AM" };
+    if (!str24) return { h: "0", m: "00" };
     const [hh, mm] = str24.split(":");
-    let hNum = parseInt(hh, 10);
-    let ampm = "AM";
-    if (hNum >= 12) {
-      if (hNum > 12) hNum -= 12;
-      ampm = "PM";
-    }
-    if (hNum === 0) hNum = 12;
-    return { h: hNum.toString(), m: mm, ampm };
+    return { h: parseInt(hh, 10).toString(), m: mm };
   };
 
   if (toggleAutoSync) {
@@ -406,16 +468,54 @@ function bindMainEvents() {
       hoursInput.value = res.syncHours || "4";
 
       const tTime = from24h(res.syncTime || "00:00");
-      th.value = tTime.h; tm.value = tTime.m; tampm.value = tTime.ampm;
+      th.value = tTime.h; tm.value = tTime.m;
 
       const sTime = from24h(res.syncStartTime || "00:00");
-      sh.value = sTime.h; sm.value = sTime.m; sampm.value = sTime.ampm;
+      sh.value = sTime.h; sm.value = sTime.m;
 
+      updateLastSaved();
       updateSyncUI();
     });
 
+    function updateLastSaved() {
+      lastSavedSettings = {
+        shopId: getEl("input-shopid").value.trim(),
+        defaultStore: getEl("input-store").value.trim(),
+        autoSyncEnabled: toggleAutoSync.checked,
+        syncMode: modeSelect.value,
+        syncTime: to24h(th.value, tm.value),
+        syncHours: hoursInput.value,
+        syncStartTime: to24h(sh.value, sm.value)
+      };
+      checkChanges();
+    }
+
+    function checkChanges() {
+      const current = {
+        shopId: getEl("input-shopid").value.trim(),
+        defaultStore: getEl("input-store").value.trim(),
+        autoSyncEnabled: toggleAutoSync.checked,
+        syncMode: modeSelect.value,
+        syncTime: to24h(th.value, tm.value),
+        syncHours: hoursInput.value,
+        syncStartTime: to24h(sh.value, sm.value)
+      };
+      
+      const hasChanged = JSON.stringify(current) !== JSON.stringify(lastSavedSettings);
+      btnSaveSync.disabled = !hasChanged;
+    }
+
     function updateSyncUI() {
-      optionsDiv.style.display = toggleAutoSync.checked ? "flex" : "none";
+      const isEnabled = toggleAutoSync.checked;
+      optionsDiv.style.display = isEnabled ? "flex" : "none";
+      btnSaveSync.style.display = isEnabled ? "block" : "none";
+      
+      const card = getEl("sync-card");
+      if (card) {
+        if (isEnabled) card.classList.add("active");
+        else card.classList.remove("active");
+      }
+      
       if (modeSelect.value === "daily") {
         timeWrap.style.display = "flex";
         hoursWrap.style.display = "none";
@@ -423,29 +523,50 @@ function bindMainEvents() {
         timeWrap.style.display = "none";
         hoursWrap.style.display = "flex";
       }
+      checkChanges();
     }
 
     function saveSyncConfig() {
-      const p = storage.set({
+      const current = {
+        shopId: getEl("input-shopid").value.trim(),
+        defaultStore: getEl("input-store").value.trim(),
         autoSyncEnabled: toggleAutoSync.checked,
         syncMode: modeSelect.value,
-        syncTime: to24h(th.value, tm.value, tampm.value),
-        syncHours: parseInt(hoursInput.value, 10) || 4,
-        syncStartTime: to24h(sh.value, sm.value, sampm.value)
+        syncTime: to24h(th.value, tm.value),
+        syncHours: hoursInput.value, // Keep as string for comparison
+        syncStartTime: to24h(sh.value, sm.value)
+      };
+      
+      const p = storage.set({
+        ...current,
+        syncHours: parseInt(current.syncHours, 10) || 4 // Save as number for backend logic
       }).then(() => {
+        lastSavedSettings = { ...current };
         chrome.runtime.sendMessage({ type: "UPDATE_ALARM" }).catch(() => {});
       });
       return p;
     }
 
-    toggleAutoSync.addEventListener("change", updateSyncUI);
-    modeSelect.addEventListener("change", updateSyncUI);
+    [toggleAutoSync, modeSelect, hoursInput, th, tm, sh, sm].forEach(el => {
+      el.addEventListener("change", () => {
+        updateSyncUI();
+        checkChanges();
+      });
+    });
+    
+    [getEl("input-shopid"), getEl("input-store"), hoursInput].forEach(el => {
+      el.addEventListener("input", checkChanges);
+    });
     
     btnSaveSync.addEventListener("click", () => {
+      btnSaveSync.disabled = true;
       btnSaveSync.textContent = "Saving...";
       saveSyncConfig().then(() => {
-        setTimeout(() => { btnSaveSync.textContent = "Save Settings"; }, 1000);
-        setStatus("success", "✅", "Auto-sync settings strictly scheduled.", true);
+        setTimeout(() => { 
+          btnSaveSync.textContent = "Save Settings"; 
+          checkChanges(); // Re-check after text change to ensure button goes back to disabled
+        }, 1000);
+        setStatus("success", "✅", "Settings saved successfully.", true);
       });
     });
   }

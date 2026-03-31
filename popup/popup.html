@@ -80,8 +80,16 @@
         <span class="logo-text">Merchemy<span class="logo-accent"> Scraper</span></span>
       </div>
       <div class="header-right">
-        <span class="user-badge" id="user-badge"></span>
-        <button class="btn-icon" id="btn-logout" title="Sign out">🚪</button>
+        <div class="user-info">
+          <div class="org-row">
+            <span class="org-badge" id="org-badge"></span>
+            <button class="btn-icon-sm" id="btn-switch-org" title="Switch Organization">🔄</button>
+          </div>
+          <span class="user-badge" id="user-badge"></span>
+        </div>
+        <button class="btn-icon" id="btn-logout" title="Sign out" style="color: #fff;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        </button>
       </div>
     </header>
 
@@ -108,54 +116,57 @@
 
     <!-- Auto Sync Settings -->
     <section class="section">
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <input type="checkbox" id="toggle-autosync" style="width: 16px; height: 16px; margin: 0; cursor: pointer;">
-          <label class="label" for="toggle-autosync" style="margin-bottom: 0; cursor: pointer; font-weight: 500;">Enable Auto-Sync</label>
-        </div>
-        <button id="btn-save-sync" class="btn btn-primary" style="padding: 4px 12px; font-size: 11px;">Save Settings</button>
-      </div>
-      
-      <div id="autosync-options" style="display: none; padding-left: 24px; gap: 8px; flex-direction: column;">
-        <div>
-          <label class="label" for="sync-mode" style="margin-bottom: 4px;">Frequency</label>
-          <select id="sync-mode" class="input">
-            <option value="daily">Daily at specific time</option>
-            <option value="hourly">Every N hours</option>
-          </select>
-        </div>
-        
-        <div id="sync-time-wrap" style="display: flex; gap: 4px; align-items: center;">
-          <label class="label" style="margin-bottom: 0; width: 60px;">Time:</label>
-          <select id="sync-time-h" class="input" style="width: 50px; padding: 4px;">
-            <option value="1">01</option><option value="2">02</option><option value="3">03</option><option value="4">04</option><option value="5">05</option><option value="6">06</option><option value="7">07</option><option value="8">08</option><option value="9">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option>
-          </select>
-          <span>:</span>
-          <select id="sync-time-m" class="input" style="width: 50px; padding: 4px;">
-            <option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option>
-          </select>
-          <select id="sync-time-ampm" class="input" style="width: 60px; padding: 4px;">
-            <option value="AM">AM</option><option value="PM">PM</option>
-          </select>
-        </div>
-        
-        <div id="sync-hours-wrap" style="display: none; flex-direction: column; gap: 8px;">
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <label class="label" for="sync-hours" style="margin-bottom: 0; width: 60px;">Hours:</label>
-            <input type="number" id="sync-hours" class="input" style="width: 60px;" value="4" min="1" max="24" />
+      <div id="sync-card" class="sync-card">
+        <div class="sync-header">
+          <div class="sync-title">
+            <span>🔄</span> Auto-Sync Settings
           </div>
-          <div style="display: flex; gap: 4px; align-items: center;">
-            <label class="label" style="margin-bottom: 0; width: 60px;">Start at:</label>
-            <select id="sync-start-h" class="input" style="width: 50px; padding: 4px;">
-              <option value="1">01</option><option value="2">02</option><option value="3">03</option><option value="4">04</option><option value="5">05</option><option value="6">06</option><option value="7">07</option><option value="8">08</option><option value="9">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option>
-            </select>
-            <span>:</span>
-            <select id="sync-start-m" class="input" style="width: 50px; padding: 4px;">
-              <option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option>
-            </select>
-            <select id="sync-start-ampm" class="input" style="width: 60px; padding: 4px;">
-              <option value="AM">AM</option><option value="PM">PM</option>
-            </select>
+          <label class="switch">
+            <input type="checkbox" id="toggle-autosync">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div id="autosync-options" style="display: none; flex-direction: column; gap: 12px;">
+          <div class="sync-options-inner">
+            <!-- Frequency -->
+            <div class="option-row">
+              <label class="option-label" for="sync-mode">⚡ Frequency</label>
+              <select id="sync-mode" class="input">
+                <option value="daily">Daily at specific time</option>
+                <option value="hourly">Every N hours</option>
+              </select>
+            </div>
+            
+            <!-- Daily Time -->
+            <div id="sync-time-wrap" class="option-row">
+              <label class="option-label">🕒 Target Time</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <select id="sync-time-h" class="input" style="width: 70px;"></select>
+                <span style="color: var(--muted); font-weight: bold;">:</span>
+                <select id="sync-time-m" class="input" style="width: 70px;"></select>
+              </div>
+            </div>
+            
+            <!-- Hourly Interval -->
+            <div id="sync-hours-wrap" style="display: none; flex-direction: column; gap: 10px;">
+              <div class="option-row">
+                <label class="option-label" for="sync-hours">⏳ Interval (Hours)</label>
+                <input type="number" id="sync-hours" class="input" value="4" min="1" max="24" />
+              </div>
+              <div class="option-row">
+                <label class="option-label">🏁 Start Time</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <select id="sync-start-h" class="input" style="width: 70px;"></select>
+                  <span style="color: var(--muted); font-weight: bold;">:</span>
+                  <select id="sync-start-m" class="input" style="width: 70px;"></select>
+                </div>
+              </div>
+            </div>
+
+            <button id="btn-save-sync" class="btn btn-primary btn-full" style="padding: 10px; margin-top: 5px;" disabled>
+              <span>💾</span> Save Settings
+            </button>
           </div>
         </div>
       </div>
