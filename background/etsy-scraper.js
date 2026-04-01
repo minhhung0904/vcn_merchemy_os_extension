@@ -3,21 +3,16 @@
 
 const DEFAULT_LIMIT = 50;
 
-export async function scrapeEtsyOrders(shopId, storeName, orderStateId = '') {
-  // 1. Get CSRF token via cookies API
-  const cookie = await chrome.cookies.get({ url: 'https://www.etsy.com', name: 'csrf_nonce' });
-  const csrfToken = cookie ? decodeURIComponent(cookie.value) : '';
-  
-  if (!csrfToken) {
-    throw new Error("Missing Etsy CSRF token. The user might be logged out of Etsy.");
-  }
+export async function scrapeEtsyOrders(shopId, storeName, orderStateIdFallback = '1347445165681') {
+  // 1. Fetch orders page to get dynamic context (page_guid, order_state_id)
+  const context = await getDynamicContext(orderStateIdFallback);
+  const { pageGuid, orderStateId } = context;
 
-  // 2. Fetch one page to get total count
-  const firstPage = await fetchOrderPage(shopId, 0, DEFAULT_LIMIT, orderStateId, csrfToken);
+  // 2. Fetch one page first to get total count and first batch
+  const firstPage = await fetchOrderPage(shopId, 0, DEFAULT_LIMIT, orderStateId, pageGuid);
   const search = firstPage?.orders_search;
   if (!search) throw new Error('Unexpected API response structure from Etsy.');
 
-  const totalCount = search.total_count || 0;
   let buyerMap = buildBuyerMap(search.buyers || []);
   let allMapped = (search.orders || []).map(o => mapOrder(o, buyerMap, storeName));
 
@@ -29,7 +24,7 @@ export async function scrapeEtsyOrders(shopId, storeName, orderStateId = '') {
     // Random delay (1.5s - 3.5s) to mimic human behavior
     await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 2000) + 1500));
 
-    const page = await fetchOrderPage(shopId, offset, DEFAULT_LIMIT, orderStateId, csrfToken);
+    const page = await fetchOrderPage(shopId, offset, DEFAULT_LIMIT, orderStateId, pageGuid);
     const ps = page?.orders_search;
     if (!ps || !ps.orders || ps.orders.length === 0) break;
 
@@ -42,6 +37,85 @@ export async function scrapeEtsyOrders(shopId, storeName, orderStateId = '') {
   }
 
   return allMapped;
+}
+
+async function getDynamicContext(fallbackStateId) {
+  try {
+    const res = await fetch('https://www.etsy.com/your/orders/sold/new', {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': navigator.language ? `${navigator.language},en-US;q=0.9,en;q=0.8` : 'vi,en-US;q=0.9,en;q=0.8',
+      }
+    });
+
+    if (!res.ok) return { pageGuid: '1024c2b72e2e.ed4169a0ac8c681fa062.00', orderStateId: fallbackStateId, detectedLocale: 'USD|en-US|US' };
+    const html = await res.text();
+
+    let pageGuid = '1024c2b72e2e.ed4169a0ac8c681fa062.00';
+    const guidMatch = html.match(/"page_guid"\s*:\s*"([^"]+)"/) || html.match(/x-page-guid"?\s*(?:content=|:)\s*"?([^">]+)"?/);
+    if (guidMatch) pageGuid = guidMatch[1];
+
+    let orderStateId = fallbackStateId;
+    const stateMatch = html.match(/"order_state_id"\s*:\s*"?(\d+)"?/);
+    if (stateMatch) orderStateId = stateMatch[1];
+    
+    let detectedLocale = 'USD|en-US|US';
+    const locMatch = html.match(/"detected_locale"\s*:\s*"([^"]+)"/);
+    if (locMatch) detectedLocale = locMatch[1];
+
+    return { pageGuid, orderStateId, detectedLocale };
+  } catch (err) {
+    return { pageGuid: '1024c2b72e2e.ed4169a0ac8c681fa062.00', orderStateId: fallbackStateId, detectedLocale: 'USD|en-US|US' };
+  }
+}
+
+async function getDeviceHeaders() {
+  const headers = {};
+  
+  if (navigator.userAgentData) {
+    headers['sec-ch-ua'] = navigator.userAgentData.brands.map(b => `"${b.brand}";v="${b.version}"`).join(', ');
+    headers['sec-ch-ua-mobile'] = navigator.userAgentData.mobile ? '?1' : '?0';
+    headers['sec-ch-ua-platform'] = `"${navigator.userAgentData.platform}"`;
+    try {
+      const he = await navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness', 'platformVersion', 'fullVersionList']);
+      headers['sec-ch-ua-arch'] = `"${he.architecture || 'x86'}"`;
+      headers['sec-ch-ua-bitness'] = `"${he.bitness || '64'}"`;
+      headers['sec-ch-ua-platform-version'] = `"${he.platformVersion || ''}"`;
+      if (he.fullVersionList && he.fullVersionList.length > 0) {
+        headers['sec-ch-ua-full-version-list'] = he.fullVersionList.map(b => `"${b.brand}";v="${b.version}"`).join(', ');
+      }
+    } catch(e) {}
+  } else {
+    headers['sec-ch-ua'] = '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"';
+    headers['sec-ch-ua-mobile'] = '?0';
+    headers['sec-ch-ua-platform'] = '"Windows"';
+    headers['sec-ch-ua-arch'] = '"x86"';
+    headers['sec-ch-ua-bitness'] = '"64"';
+    headers['sec-ch-ua-full-version-list'] = '"Not:A-Brand";v="99.0.0.0", "Google Chrome";v="145.0.7632.176", "Chromium";v="145.0.7632.176"';
+    headers['sec-ch-ua-platform-version'] = '"19.0.0"';
+  }
+  
+  const conn = navigator.connection;
+  if (conn) {
+    if (conn.downlink !== undefined) headers['downlink'] = String(conn.downlink);
+    if (conn.effectiveType) headers['ect'] = conn.effectiveType;
+    if (conn.rtt !== undefined) headers['rtt'] = String(conn.rtt);
+  } else {
+    headers['downlink'] = '10';
+    headers['ect'] = '4g';
+    headers['rtt'] = '0';
+  }
+  
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? String(window.devicePixelRatio) : '1';
+  headers['dpr'] = dpr;
+  headers['sec-ch-dpr'] = dpr;
+  headers['priority'] = 'u=1, i';
+  headers['sec-fetch-dest'] = 'empty';
+  headers['sec-fetch-mode'] = 'cors';
+  headers['sec-fetch-site'] = 'same-origin';
+  headers['user-agent'] = navigator.userAgent;
+  
+  return headers;
 }
 
 function buildApiUrl(shopId, offset, limit, orderStateId) {
@@ -62,21 +136,29 @@ function buildApiUrl(shopId, offset, limit, orderStateId) {
     limit: String(limit),
     offset: String(offset),
     search_terms: '',
-    sort_by: 'order_date',
-    sort_order: 'desc',
+    sort_by: 'expected_ship_date',
+    sort_order: 'asc',
     'objects_enabled_for_normalization[order_state]': 'true',
   });
   return `https://www.etsy.com/api/v3/ajax/bespoke/shop/${shopId}/mission-control/orders/data?${params.toString()}`;
 }
 
-async function fetchOrderPage(shopId, offset, limit, orderStateId, csrfToken) {
+async function fetchOrderPage(shopId, offset, limit, ctx) {
+  const { orderStateId, pageGuid, detectedLocale } = ctx;
   const url = buildApiUrl(shopId, offset, limit, orderStateId);
+  const deviceHeaders = await getDeviceHeaders();
+  
   const res = await fetch(url, {
     method: 'GET',
     credentials: 'include',
     headers: {
-      'Accept': 'application/json',
-      'x-csrf-token': csrfToken,
+      ...deviceHeaders,
+      'accept': '*/*',
+      'accept-language': navigator.language ? `${navigator.language},en-US;q=0.9,en;q=0.8` : 'vi,en-US;q=0.9,en;q=0.8',
+      'content-type': 'application/json',
+      'referer': 'https://www.etsy.com/your/orders/sold?ref=seller-platform-mcnav',
+      'x-detected-locale': detectedLocale,
+      'x-page-guid': pageGuid,
     },
   });
   if (!res.ok) throw new Error(`Etsy API error ${res.status}: ${res.statusText}`);

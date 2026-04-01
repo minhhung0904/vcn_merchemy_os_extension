@@ -16,7 +16,7 @@
     'https://www.etsy.com/api/v3/ajax/bespoke/shop';
 
   const DEFAULT_LIMIT = 50; // Etsy allows up to 100 per page
-  const DEFAULT_ORDER_STATE = ''; // empty = all states
+  const DEFAULT_ORDER_STATE = '1347445165681'; // empty = all states, 1347445165681 = new
 
   // ─── Get Shop (Business) ID ───────────────────────────────────────────────────
   // Etsy embeds the shop ID in multiple places on the page.
@@ -63,7 +63,7 @@
 
   // ─── Build API URL ────────────────────────────────────────────────────────────
 
-  function buildApiUrl(shopId, offset = 0, limit = DEFAULT_LIMIT, orderStateId = '') {
+  function buildApiUrl(shopId, offset = 0, limit = DEFAULT_LIMIT, orderStateId = DEFAULT_ORDER_STATE) {
     const params = new URLSearchParams({
       'filters[buyer_id]': 'all',
       'filters[channel]': 'all',
@@ -81,8 +81,8 @@
       limit: String(limit),
       offset: String(offset),
       search_terms: '',
-      sort_by: 'order_date',
-      sort_order: 'desc',
+      sort_by: 'expected_ship_date',
+      sort_order: 'asc',
       'objects_enabled_for_normalization[order_state]': 'true',
     });
 
@@ -91,45 +91,131 @@
 
   // ─── Fetch a single page ──────────────────────────────────────────────────────
 
-  async function fetchOrderPage(shopId, offset, limit, orderStateId) {
+  function getDynamicContext(fallbackStateId) {
+    let pageGuid = '';
+    let orderStateId = '';
+    let detectedLocale = '';
+
+    const metaGuid = document.querySelector('meta[name="x-page-guid"], meta[property="x-page-guid"]');
+    if (metaGuid && metaGuid.content) pageGuid = metaGuid.content;
+
+    if (!pageGuid) {
+      const match = document.cookie.match(/(?:(?:^|.*;\s*)x-page-guid\s*\=\s*([^;]*).*$)|^.*$/);
+      if (match && match[1]) pageGuid = decodeURIComponent(match[1]);
+    }
+
+    const scripts = document.querySelectorAll('script');
+    for (const s of scripts) {
+      const text = s.textContent;
+      if (!text) continue;
+
+      if (!pageGuid) {
+        const m = text.match(/"page_guid"\s*:\s*"([^"]+)"/) || text.match(/"x-page-guid"\s*:\s*"([^"]+)"/);
+        if (m) pageGuid = m[1];
+      }
+
+      if (!orderStateId) {
+        const m = text.match(/"order_state_id"\s*:\s*"?(\d+)"?/);
+        if (m) orderStateId = m[1];
+      }
+      
+      if (!detectedLocale) {
+        const m = text.match(/"detected_locale"\s*:\s*"([^"]+)"/);
+        if (m) detectedLocale = m[1];
+      }
+
+      if (pageGuid && orderStateId && detectedLocale) break;
+    }
+
+    return {
+      pageGuid: pageGuid || '1024c2b72e2e.ed4169a0ac8c681fa062.00',
+      orderStateId: orderStateId || fallbackStateId || '1347445165681',
+      detectedLocale: detectedLocale || 'USD|en-US|US'
+    };
+  }
+
+  async function getDeviceHeaders() {
+    const headers = {};
+    
+    if (navigator.userAgentData) {
+      headers['sec-ch-ua'] = navigator.userAgentData.brands.map(b => `"${b.brand}";v="${b.version}"`).join(', ');
+      headers['sec-ch-ua-mobile'] = navigator.userAgentData.mobile ? '?1' : '?0';
+      headers['sec-ch-ua-platform'] = `"${navigator.userAgentData.platform}"`;
+      try {
+        const he = await navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness', 'platformVersion', 'fullVersionList']);
+        headers['sec-ch-ua-arch'] = `"${he.architecture || 'x86'}"`;
+        headers['sec-ch-ua-bitness'] = `"${he.bitness || '64'}"`;
+        headers['sec-ch-ua-platform-version'] = `"${he.platformVersion || ''}"`;
+        if (he.fullVersionList && he.fullVersionList.length > 0) {
+          headers['sec-ch-ua-full-version-list'] = he.fullVersionList.map(b => `"${b.brand}";v="${b.version}"`).join(', ');
+        }
+      } catch(e) {}
+    } else {
+      headers['sec-ch-ua'] = '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"';
+      headers['sec-ch-ua-mobile'] = '?0';
+      headers['sec-ch-ua-platform'] = '"Windows"';
+      headers['sec-ch-ua-arch'] = '"x86"';
+      headers['sec-ch-ua-bitness'] = '"64"';
+      headers['sec-ch-ua-full-version-list'] = '"Not:A-Brand";v="99.0.0.0", "Google Chrome";v="145.0.7632.176", "Chromium";v="145.0.7632.176"';
+      headers['sec-ch-ua-platform-version'] = '"19.0.0"';
+    }
+    
+    const conn = navigator.connection;
+    if (conn) {
+      if (conn.downlink !== undefined) headers['downlink'] = String(conn.downlink);
+      if (conn.effectiveType) headers['ect'] = conn.effectiveType;
+      if (conn.rtt !== undefined) headers['rtt'] = String(conn.rtt);
+    } else {
+      headers['downlink'] = '10';
+      headers['ect'] = '4g';
+      headers['rtt'] = '0';
+    }
+    
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? String(window.devicePixelRatio) : '1';
+    headers['dpr'] = dpr;
+    headers['sec-ch-dpr'] = dpr;
+    headers['priority'] = 'u=1, i';
+    headers['sec-fetch-dest'] = 'empty';
+    headers['sec-fetch-mode'] = 'cors';
+    headers['sec-fetch-site'] = 'same-origin';
+    headers['user-agent'] = navigator.userAgent;
+    
+    return headers;
+  }
+
+  async function fetchOrderPage(shopId, offset, limit, ctx) {
+    const { orderStateId, pageGuid, detectedLocale } = ctx;
     const url = buildApiUrl(shopId, offset, limit, orderStateId);
+    const deviceHeaders = await getDeviceHeaders();
+    
     const res = await fetch(url, {
       method: 'GET',
       credentials: 'include',
       headers: {
-        'Accept': 'application/json',
-        'x-csrf-token': getCsrfToken(),
+        ...deviceHeaders,
+        'accept': '*/*',
+        'accept-language': navigator.language ? `${navigator.language},en-US;q=0.9,en;q=0.8` : 'vi,en-US;q=0.9,en;q=0.8',
+        'content-type': 'application/json',
+        'referer': 'https://www.etsy.com/your/orders/sold?ref=seller-platform-mcnav',
+        'x-detected-locale': detectedLocale,
+        'x-page-guid': pageGuid,
       },
     });
     if (!res.ok) throw new Error(`Etsy API error ${res.status}: ${res.statusText}`);
     return res.json();
   }
 
-  // ─── Get CSRF Token ───────────────────────────────────────────────────────────
-
-  function getCsrfToken() {
-    // Etsy stores the CSRF token in a cookie named 'user_prefs' or 'csrf_nonce'
-    const cookies = document.cookie.split(';');
-    for (const c of cookies) {
-      const [k, v] = c.trim().split('=');
-      if (k === 'csrf_nonce' || k === 'x_csrf_nonce') return decodeURIComponent(v || '');
-    }
-    // Also check meta tags
-    const meta = document.querySelector('meta[name="csrf-token"], meta[name="x-csrf-token"]');
-    return meta?.content || '';
-  }
-
   // ─── Fetch ALL orders (paginated) ─────────────────────────────────────────────
 
   async function fetchAllOrders(shopId, options = {}) {
+    const ctx = getDynamicContext(options.orderStateId || DEFAULT_ORDER_STATE);
     const limit = options.limit || DEFAULT_LIMIT;
-    const orderStateId = options.orderStateId || '';
     let offset = 0;
     let totalCount = null;
     const rawOrders = [];
 
     do {
-      const data = await fetchOrderPage(shopId, offset, limit, orderStateId);
+      const data = await fetchOrderPage(shopId, offset, limit, ctx);
       const search = data?.orders_search;
       if (!search) throw new Error('Unexpected API response structure.');
 
@@ -344,8 +430,10 @@
         return;
       }
 
+      const ctx = getDynamicContext(message.orderStateId || DEFAULT_ORDER_STATE);
+
       // 2. Fetch one page first to get total count and first batch
-      const firstPage = await fetchOrderPage(shopId, 0, DEFAULT_LIMIT, message.orderStateId || '');
+      const firstPage = await fetchOrderPage(shopId, 0, DEFAULT_LIMIT, ctx);
       const search = firstPage?.orders_search;
       if (!search) {
         sendResponse({ ok: false, error: 'Unexpected API response structure from Etsy.' });
@@ -366,7 +454,7 @@
         // Random delay (1.5s - 3.5s) to mimic human behavior
         await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 2000) + 1500));
 
-        const page = await fetchOrderPage(shopId, offset, DEFAULT_LIMIT, message.orderStateId || '');
+        const page = await fetchOrderPage(shopId, offset, DEFAULT_LIMIT, ctx);
         const ps = page?.orders_search;
         if (!ps || !ps.orders || ps.orders.length === 0) break;
 

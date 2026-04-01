@@ -508,7 +508,7 @@ function bindMainEvents() {
     function updateSyncUI() {
       const isEnabled = toggleAutoSync.checked;
       optionsDiv.style.display = isEnabled ? "flex" : "none";
-      btnSaveSync.style.display = isEnabled ? "block" : "none";
+      btnSaveSync.style.display = "block";
       
       const card = getEl("sync-card");
       if (card) {
