@@ -268,64 +268,56 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
 // ─── Main prefs ───────────────────────────────────────────────────────────────
 
 async function loadMainPrefs() {
-  const { defaultStore, shopId } = await storage.get([
+  const { defaultStore, shopId, orderStateId, orderStates } = await storage.get([
     "defaultStore",
     "shopId",
+    "orderStateId",
+    "orderStates"
   ]);
   if (defaultStore) getEl("input-store").value = defaultStore;
   if (shopId) getEl("input-shopid").value = shopId;
-}
-
-async function forceDetectShopInfo(silent = false) {
-  try {
-    const res = await fetch("https://www.etsy.com/your/shops/me/dashboard", { credentials: "include" });
-    const html = await res.text();
-    
-    let shopId = "";
-    let storeName = "";
-    
-    // Attempt parsing globals
-    const globalMatch = html.match(/window\.__page_globals\s*=\s*({.*?});/s);
-    if (globalMatch) {
-      try {
-        const globals = JSON.parse(globalMatch[1]);
-        if (globals.shop_id) shopId = String(globals.shop_id);
-        if (globals.business_id) shopId = String(globals.business_id);
-        if (globals.shop_name) storeName = String(globals.shop_name);
-      } catch (e) {}
-    }
-    
-    if (!shopId) {
-      const idMatch = html.match(/"shop_id"\s*:\s*(\d+)/) || html.match(/"business_id"\s*:\s*(\d+)/);
-      if (idMatch) shopId = idMatch[1];
-    }
-    if (!storeName) {
-      const nameMatch = html.match(/"shop_name"\s*:\s*"([^"]+)"/);
-      if (nameMatch) storeName = nameMatch[1];
-    }
-    
-    if (shopId) {
-      getEl("input-shopid").value = shopId;
-      storage.set({ shopId });
-    }
-    if (storeName) {
-      getEl("input-store").value = storeName;
-      storage.set({ defaultStore: storeName });
-    }
-    
-    if (!silent) {
-      if (shopId && storeName) {
-        setStatus("success", "✅", `Detected: ${storeName} (${shopId})`, true);
-      } else if (shopId) {
-        setStatus("success", "✅", `Detected Shop ID: ${shopId}`, true);
-      } else {
-        autoDetectShopIdActiveTab();
-      }
-    }
-  } catch (err) {
-    if (!silent) autoDetectShopIdActiveTab();
+  
+  if (orderStates && orderStates.length > 0) {
+    renderOrderStates(orderStates, orderStateId);
   }
 }
+
+function renderOrderStates(states, selectedId) {
+  const select = getEl("select-order-state");
+  if (!select) return;
+  
+  // Reset with empty default option
+  select.innerHTML = '<option value="">Select Order State (Optional)</option>';
+  
+  states.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = `${s.label} (${s.id})`;
+    if (String(s.id) === String(selectedId)) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+ 
+async function forceDetectShopInfo(silent = false) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url?.includes("etsy.com")) {
+      if (!silent) setStatus("error", "❌", "Please navigate to Etsy to detect shop info.", true);
+      return;
+    }
+
+    // Reuse the detection logic by calling autoDetectShopIdActiveTab or similar
+    await autoDetectShopIdActiveTab();
+    
+    const { shopId, defaultStore } = await storage.get(["shopId", "defaultStore"]);
+    if (shopId && !silent) {
+       setStatus("success", "✅", `Detected: ${defaultStore || "Shop"} (${shopId})`, true);
+    }
+  } catch (err) {
+    if (!silent) setStatus("error", "❌", "Failed to detect shop info.", true);
+  }
+}
+
 
 async function autoDetectShopIdActiveTab() {
   try {
@@ -337,18 +329,54 @@ async function autoDetectShopIdActiveTab() {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
-        let shopId = "";
+        // Robust detection logic from content/etsy.js
+        function getShopId() {
+          const metaShopId = document.querySelector('meta[name="shop-id"]');
+          if (metaShopId?.content) return metaShopId.content;
+
+          try {
+            const globals = window.__reactPageGlobals || window.__page_globals || {};
+            if (globals.shop_id) return String(globals.shop_id);
+            if (globals.business_id) return String(globals.business_id);
+          } catch (_) {}
+
+          try {
+            if (window.etsy?.Session?.shopId) return String(window.etsy.Session.shopId);
+          } catch (_) {}
+
+          const mcLinks = Array.from(document.querySelectorAll('a[href*="mission-control"], script'))
+            .map(el => el.href || el.src || el.textContent || '')
+            .join(' ');
+          const mcMatch = mcLinks.match(/\/shop\/(\d+)\//);
+          if (mcMatch) return mcMatch[1];
+
+          const urlMatch = window.location.href.match(/\/shop\/(\d+)\//);
+          if (urlMatch) return urlMatch[1];
+
+          const scripts = document.querySelectorAll('script[type="application/json"], script:not([src])');
+          for (const s of scripts) {
+            const m = s.textContent.match(/"business_id"\s*:\s*(\d+)/);
+            if (m) return m[1];
+            const m2 = s.textContent.match(/"shop_id"\s*:\s*(\d+)/);
+            if (m2) return m2[1];
+          }
+          return null;
+        }
+
+        const shopId = getShopId();
         let storeName = "";
-        for (const s of document.querySelectorAll("script")) {
-          const idM = s.textContent.match(/"business_id"\s*:\s*(\d+)/) || s.textContent.match(/"shop_id"\s*:\s*(\d+)/);
-          if (idM) shopId = idM[1];
-          const nameM = s.textContent.match(/"shop_name"\s*:\s*"([^"]+)"/);
-          if (nameM) storeName = nameM[1];
+        try {
+          const globals = window.__reactPageGlobals || window.__page_globals || {};
+          if (globals.shop_name) storeName = String(globals.shop_name);
+        } catch (_) {}
+        if (!storeName) {
+           const scripts = document.querySelectorAll('script');
+           for (const s of scripts) {
+             const nameM = s.textContent.match(/"shop_name"\s*:\s*"([^"]+)"/);
+             if (nameM) { storeName = nameM[1]; break; }
+           }
         }
-        if (!shopId) {
-          const m = window.location.href.match(/\/shop\/(\d+)\//);
-          if (m) shopId = m[1];
-        }
+
         return { shopId, storeName };
       },
     });
@@ -363,6 +391,27 @@ async function autoDetectShopIdActiveTab() {
         getEl("input-store").value = storeName;
         storage.set({ defaultStore: storeName });
       }
+
+      // Fetch order states (ensure content script is injected first)
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["content/etsy.js"]
+      }).catch(() => {});
+
+      chrome.tabs.sendMessage(tab.id, { type: "GET_ORDER_STATES" }, (resp) => {
+        if (resp?.ok && resp.states) {
+          // Auto-select "New" if found, otherwise use first state or existing saved selection
+          const newState = resp.states.find(s => s.label.toLowerCase().includes('new'));
+          const selectedId = newState ? newState.id : resp.states[0]?.id;
+
+          renderOrderStates(resp.states, selectedId);
+          storage.set({ 
+            orderStates: resp.states,
+            orderStateId: selectedId
+          });
+        }
+      });
+
       if (shopId || storeName) {
         setStatus("success", "✅", `Detected from tab: ${storeName || "Unknown"} (${shopId || "Unknown"})`, true);
       } else {
@@ -385,6 +434,11 @@ function bindMainEvents() {
     btn.textContent = "Detecting...";
     await forceDetectShopInfo(false);
     btn.textContent = "Auto Detect";
+  });
+
+  getEl("select-order-state").addEventListener("change", (e) => {
+    const orderStateId = e.target.value;
+    storage.set({ orderStateId });
   });
 
   // Switch organization
@@ -412,6 +466,10 @@ function bindMainEvents() {
   });
   getEl("input-store").addEventListener("change", () => {
     storage.set({ defaultStore: getEl("input-store").value.trim() });
+  });
+
+  getEl("select-order-state").addEventListener("change", () => {
+    storage.set({ orderStateId: getEl("select-order-state").value });
   });
 
   // Persist auto-sync setting
@@ -551,6 +609,13 @@ function bindMainEvents() {
       el.addEventListener("change", () => {
         updateSyncUI();
         checkChanges();
+        
+        // Immediate save for the toggle itself to ensure persistence even if Save button is hidden
+        if (el === toggleAutoSync) {
+          storage.set({ autoSyncEnabled: toggleAutoSync.checked }).then(() => {
+            chrome.runtime.sendMessage({ type: "UPDATE_ALARM" }).catch(() => {});
+          });
+        }
       });
     });
     
@@ -615,6 +680,13 @@ async function onScrape() {
 
     const shopId = getEl("input-shopid").value.trim();
     const storeName = getEl("input-store").value.trim();
+    const orderStateId = getEl("select-order-state").value;
+
+    if (!orderStateId) {
+      setStatus("error", "❌", "Please detect or select an Order State first.", true);
+      getEl("btn-scrape").disabled = false;
+      return;
+    }
 
     await chrome.scripting
       .executeScript({
@@ -627,6 +699,7 @@ async function onScrape() {
       type: "SCRAPE_ETSY_ORDERS",
       shopId,
       storeName,
+      orderStateId,
     });
 
     if (!response?.ok) throw new Error(response?.error || "Scrape failed");

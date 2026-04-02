@@ -1,7 +1,7 @@
 // background.js — Service Worker
 // Handles API communication with Merchemy OS backend
 
-import { scrapeEtsyOrders } from './background/etsy-scraper.js';
+
 
 
 const DEFAULT_API_URL = "http://localhost:3000/api/v2";
@@ -168,8 +168,64 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     }
     
     try {
-      const orders = await scrapeEtsyOrders(shopId, defaultStore || "Etsy Shop");
+      // 1. Find an existing Etsy tab to perform the scrape in the 'web' context
+      let [tab] = await chrome.tabs.query({ url: "*://*.etsy.com/*" });
+      let tabCreated = false;
+
+      if (!tab) {
+        console.log("[Auto-Sync] No open Etsy tab found. Opening a background tab...");
+        // Open to a safe Etsy URL
+        tab = await chrome.tabs.create({ url: "https://www.etsy.com/your/shops/me/dashboard", active: false });
+        tabCreated = true;
+        // Wait for tab to load
+        await new Promise((resolve) => {
+          const listener = (tabId, info) => {
+            if (tabId === tab.id && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+        });
+        // Give it a moment to stabilize/scripts to run
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      console.log(`[Auto-Sync] Using tab ${tab.id} for scraping...`);
+
+      // 2. Inject content script if not already there (safely handled by content/etsy.js guard)
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["content/etsy.js"],
+      }).catch(() => {});
+
+      // 3. Send message to start scraping
+      const response = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(tab.id, {
+          type: "SCRAPE_ETSY_ORDERS",
+          shopId,
+          storeName: defaultStore || "Etsy Shop"
+        }, (res) => {
+          if (chrome.runtime.lastError) {
+             resolve({ ok: false, error: chrome.runtime.lastError.message });
+          } else {
+             resolve(res);
+          }
+        });
+      });
+
+      // 4. Cleanup if we created the tab
+      if (tabCreated) {
+        chrome.tabs.remove(tab.id);
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(response?.error || "[Auto-Sync] Scrape failed in content script.");
+      }
+
+      const orders = response.orders || [];
       console.log(`[Auto-Sync] Successfully scraped ${orders.length} orders. Pushing...`);
+      
       if (orders.length > 0) {
         const result = await handlePushOrders(orders);
         console.log(`[Auto-Sync] Successfully pushed ${result.pushed} orders to Merchemy OS.`);
@@ -179,3 +235,4 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     }
   }
 });
+
