@@ -6,6 +6,13 @@ let tempAuthToken = null;
 let tempAuthEmail = null;
 let lastSavedSettings = {};
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const DEFAULT_ORDER_STATES = [
+  { id: '1347445165681', label: 'New' },
+  { id: '1347445165725', label: 'Completed' }
+];
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -277,9 +284,9 @@ async function loadMainPrefs() {
   if (defaultStore) getEl("input-store").value = defaultStore;
   if (shopId) getEl("input-shopid").value = shopId;
   
-  if (orderStates && orderStates.length > 0) {
-    renderOrderStates(orderStates, orderStateId);
-  }
+  // Use defaults if none saved, but filter to only show "New" and "Completed"
+  const statesToRender = (orderStates && orderStates.length > 0) ? orderStates : DEFAULT_ORDER_STATES;
+  renderOrderStates(statesToRender, orderStateId);
 }
 
 function renderOrderStates(states, selectedId) {
@@ -289,7 +296,13 @@ function renderOrderStates(states, selectedId) {
   // Reset with empty default option
   select.innerHTML = '<option value="">Select Order State (Optional)</option>';
   
-  states.forEach(s => {
+  // Filter for only New and Completed labels (case-insensitive)
+  const allowedLabels = ['new', 'completed'];
+  const filteredStates = states.filter(s => 
+    allowedLabels.some(label => s.label.toLowerCase().includes(label))
+  );
+
+  filteredStates.forEach(s => {
     const opt = document.createElement("option");
     opt.value = s.id;
     opt.textContent = `${s.label} (${s.id})`;
@@ -298,6 +311,27 @@ function renderOrderStates(states, selectedId) {
   });
 }
  
+async function isStoreRegistered(storeName) {
+  if (!storeName) return false;
+  try {
+    const { apiUrl, authToken } = await storage.get(["apiUrl", "authToken"]);
+    const url = (apiUrl || "http://localhost:3000/api/v2") + "/stores";
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${authToken}`
+      }
+    });
+    if (!res.ok) return true; // If API fails, allow to avoid blocking
+    const stores = await res.json();
+    return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");
+  } catch (e) {
+    console.error("Failed to check store existence:", e);
+    return true; // Allow if network fails
+  }
+}
+
 async function forceDetectShopInfo(silent = false) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -400,19 +434,40 @@ async function autoDetectShopIdActiveTab() {
 
       chrome.tabs.sendMessage(tab.id, { type: "GET_ORDER_STATES" }, (resp) => {
         if (resp?.ok && resp.states) {
-          // Auto-select "New" if found, otherwise use first state or existing saved selection
-          const newState = resp.states.find(s => s.label.toLowerCase().includes('new'));
-          const selectedId = newState ? newState.id : resp.states[0]?.id;
+          // Identify New and Completed states from response and update our defaults
+          const statesToSave = [...DEFAULT_ORDER_STATES];
+          
+          const detectedNew = resp.states.find(s => s.label.toLowerCase().includes('new'));
+          if (detectedNew) {
+            const newState = statesToSave.find(s => s.label === 'New');
+            if (newState) newState.id = detectedNew.id;
+          }
+          
+          const detectedCompleted = resp.states.find(s => s.label.toLowerCase().includes('completed'));
+          if (detectedCompleted) {
+            const completedState = statesToSave.find(s => s.label === 'Completed');
+            if (completedState) completedState.id = detectedCompleted.id;
+          }
 
-          renderOrderStates(resp.states, selectedId);
+          // Auto-select "New" if found
+          const selectedId = detectedNew ? detectedNew.id : (detectedCompleted ? detectedCompleted.id : statesToSave[0].id);
+
+          renderOrderStates(statesToSave, selectedId);
           storage.set({ 
-            orderStates: resp.states,
+            orderStates: statesToSave,
             orderStateId: selectedId
           });
         }
       });
 
       if (shopId || storeName) {
+        if (storeName) {
+          const registered = await isStoreRegistered(storeName);
+          if (!registered) {
+            setStatus("error", "❌", `Store "${storeName}" is not added in Merchemy OS. Please add it first.`, true);
+            return;
+          }
+        }
         setStatus("success", "✅", `Detected from tab: ${storeName || "Unknown"} (${shopId || "Unknown"})`, true);
       } else {
         setStatus("error", "❌", "Could not find shop info on this page.", true);
@@ -686,6 +741,14 @@ async function onScrape() {
       setStatus("error", "❌", "Please detect or select an Order State first.", true);
       getEl("btn-scrape").disabled = false;
       return;
+    }
+
+    if (storeName) {
+      const registered = await isStoreRegistered(storeName);
+      if (!registered) {
+        setStatus("error", "❌", `Store "${storeName}" is not added in Merchemy OS. Please add it first.`, true);
+        return;
+      }
     }
 
     await chrome.scripting

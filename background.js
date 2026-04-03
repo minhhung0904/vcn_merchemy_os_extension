@@ -155,7 +155,7 @@ async function setupSyncAlarm() {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "autoSync" || alarm.name === "midnightSync") {
     console.log("[Auto-Sync] Firing sync alarm...");
-    const { shopId, defaultStore, autoSyncEnabled } = await new Promise((res) => chrome.storage.local.get(["shopId", "defaultStore", "autoSyncEnabled"], res));
+    const { shopId, defaultStore, autoSyncEnabled, orderStates } = await new Promise((res) => chrome.storage.local.get(["shopId", "defaultStore", "autoSyncEnabled", "orderStates"], res));
     
     if (autoSyncEnabled === false) {
       console.log("[Auto-Sync] Aborted. Auto-sync is disabled by user.");
@@ -199,12 +199,22 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         files: ["content/etsy.js"],
       }).catch(() => {});
 
+      // Find "New" state from saved orderStates
+      let targetOrderStateId = "1347445165681"; // Fallback to Etsy's standard 'New' ID
+      if (orderStates && Array.isArray(orderStates)) {
+        const newState = orderStates.find(s => s.label && s.label.toLowerCase().includes('new'));
+        if (newState && newState.id) {
+          targetOrderStateId = String(newState.id);
+        }
+      }
+
       // 3. Send message to start scraping
       const response = await new Promise((resolve) => {
         chrome.tabs.sendMessage(tab.id, {
           type: "SCRAPE_ETSY_ORDERS",
           shopId,
-          storeName: defaultStore || "Etsy Shop"
+          storeName: defaultStore || "Etsy Shop",
+          orderStateId: targetOrderStateId
         }, (res) => {
           if (chrome.runtime.lastError) {
              resolve({ ok: false, error: chrome.runtime.lastError.message });
