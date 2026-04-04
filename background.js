@@ -6,7 +6,15 @@
 
 const DEFAULT_API_URL = "http://localhost:3000/api/v2";
 
+let cancelPushFlag = false;
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "CANCEL_PUSH") {
+    cancelPushFlag = true;
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (message.type === "UPDATE_ALARM") {
     setupSyncAlarm();
     sendResponse({ ok: true });
@@ -54,8 +62,10 @@ async function handlePushOrders(orders) {
 
   const CHUNK_SIZE = 50;
   let pushed = 0;
+  cancelPushFlag = false;
 
   for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
+    if (cancelPushFlag) break;
     const chunk = orders.slice(i, i + CHUNK_SIZE);
     const res = await fetch(`${apiUrl}/orders/bulk`, {
       method: "POST",

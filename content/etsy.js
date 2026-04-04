@@ -325,7 +325,7 @@
     const deviceHeaders = await getDeviceHeaders();
     // State-specific headers
     const isNew = orderStateLabel.toLowerCase().includes('new'); 
-    const isCompleted = orderStateLabel.toLowerCase().includes('completed');
+    const isCompleted = orderStateLabel.toLowerCase().includes('completed') || orderStateLabel.toLowerCase().includes('finish');
     
     const referer = isNew 
       ? 'https://www.etsy.com/your/orders/sold/new?ref=seller-platform-mcnav'
@@ -341,10 +341,6 @@
       'x-page-guid': pageGuid,
     };
 
-    if (isCompleted) {
-      headers['x-transform-response'] = 'camel-case';
-    }
-
     const res = await fetch(url.toString(), {
       method: 'GET',
       credentials: 'include',
@@ -357,7 +353,7 @@
   /**
    * Fetches shipment info (tracking number, carrier) for a list of order IDs.
    */
-  async function fetchShipments(shopId, orderIds, ctx) {
+  async function fetchShipments(shopId, orderIds, ctx, isCancelled = () => false) {
     if (!orderIds || orderIds.length === 0) return {};
     const { pageGuid, detectedLocale } = ctx;
     const deviceHeaders = await getDeviceHeaders();
@@ -367,6 +363,7 @@
     const allShipments = {};
     
     for (let i = 0; i < orderIds.length; i += batchSize) {
+      if (isCancelled()) break;
       const batch = orderIds.slice(i, i + batchSize);
       const url = new URL(`https://www.etsy.com/api/v3/ajax/shop/${shopId}/shipments/by-order`);
       batch.forEach(id => url.searchParams.append('order_ids[]', id));
@@ -628,8 +625,17 @@
 
   // ─── Main Message Handler ─────────────────────────────────────────────────────
 
+  let cancelScrapeFlag = false;
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'CANCEL_SCRAPE') {
+      cancelScrapeFlag = true;
+      sendResponse({ ok: true });
+      return true;
+    }
+
     if (message.type === 'SCRAPE_ETSY_ORDERS') {
+      cancelScrapeFlag = false;
       handleScrape(message, sendResponse);
       return true; // async
     }
@@ -684,8 +690,17 @@
       let hasMore = orders.length === DEFAULT_LIMIT;
 
       while (hasMore) {
+        if (cancelScrapeFlag) {
+          console.log('[Merchemy Scraper] Scrape cancelled.');
+          break;
+        }
         // Random delay (1.5s - 3.5s) to mimic human behavior
         await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 2000) + 1500));
+
+        if (cancelScrapeFlag) {
+          console.log('[Merchemy Scraper] Scrape cancelled.');
+          break;
+        }
 
         const page = await fetchOrderPage(shopId, offset, DEFAULT_LIMIT, ctx);
         const ps = page?.orders_search || page?.ordersSearch;
@@ -711,11 +726,11 @@
       // 4. If Completed state, fetch shipment info separately
       let shipments = {};
       const orderStateId = message.orderStateId || DEFAULT_ORDER_STATE;
-      const isCompleted = message.orderStateLabel?.toLowerCase().includes('completed');
+      const isCompleted = message.orderStateLabel?.toLowerCase().includes('completed') || message.orderStateLabel?.toLowerCase().includes('finish');
 
-      if (isCompleted && allRawOrders.length > 0) {
+      if (!cancelScrapeFlag && isCompleted && allRawOrders.length > 0) {
         const orderIds = allRawOrders.map(o => String(getV(o, 'order_id', 'orderId')));
-        shipments = await fetchShipments(shopId, orderIds, ctx);
+        shipments = await fetchShipments(shopId, orderIds, ctx, () => cancelScrapeFlag);
       }
 
       // 5. Map everything

@@ -5,6 +5,8 @@ let currentUser = null;
 let tempAuthToken = null;
 let tempAuthEmail = null;
 let lastSavedSettings = {};
+let isCancelling = false;
+let currentAction = null;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -298,7 +300,12 @@ async function loadMainPrefs() {
     "orderStates",
     "completedTimeframe"
   ]);
-  if (defaultStore) getEl("input-store").value = defaultStore;
+  if (defaultStore) {
+    getEl("input-store").value = defaultStore;
+    isStoreRegistered(defaultStore).then(registered => {
+      updateStoreWarningUI(defaultStore, registered);
+    });
+  }
   if (shopId) getEl("input-shopid").value = shopId;
   if (completedTimeframe) {
     const tf = getEl("select-timeframe");
@@ -334,6 +341,29 @@ function renderOrderStates(states, selectedId) {
   select.dispatchEvent(new Event("change"));
 }
  
+function updateStoreWarningUI(storeName, registered) {
+  const warningIcon = document.getElementById("store-warning-icon");
+  const btnRecheck = document.getElementById("btn-recheck-store");
+  const btnScrape = document.getElementById("btn-scrape");
+  const warningTextNode = document.getElementById("store-warning-text");
+  const warningStoreName = document.getElementById("warning-store-name");
+
+  if (warningIcon) {
+    warningIcon.style.display = registered ? "none" : "inline";
+    if (!registered) warningIcon.title = `WARNING: Store "${storeName}" is NOT found in Merchemy OS. Please add it first!`;
+  }
+  if (btnRecheck) {
+    btnRecheck.style.display = registered ? "none" : "inline";
+  }
+  if (btnScrape) {
+    btnScrape.disabled = !registered;
+  }
+  if (warningTextNode) {
+    warningTextNode.style.display = (storeName && !registered) ? "block" : "none";
+    if (warningStoreName) warningStoreName.textContent = storeName;
+  }
+}
+
 async function isStoreRegistered(storeName) {
   if (!storeName) return false;
   try {
@@ -365,11 +395,6 @@ async function forceDetectShopInfo(silent = false) {
 
     // Reuse the detection logic by calling autoDetectShopIdActiveTab or similar
     await autoDetectShopIdActiveTab();
-    
-    const { shopId, defaultStore } = await storage.get(["shopId", "defaultStore"]);
-    if (shopId && !silent) {
-       setStatus("success", "✅", `Detected: ${defaultStore || "Shop"} (${shopId})`, true);
-    }
   } catch (err) {
     if (!silent) setStatus("error", "❌", "Failed to detect shop info.", true);
   }
@@ -380,6 +405,11 @@ async function autoDetectShopIdActiveTab() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.url?.includes("etsy.com")) {
+      const currentStore = getEl("input-store").value.trim();
+      if (currentStore) {
+        const isRegistered = await isStoreRegistered(currentStore);
+        updateStoreWarningUI(currentStore, isRegistered);
+      }
       setStatus("error", "❌", "Cannot detect. Please log into Etsy first.", true);
       return;
     }
@@ -483,20 +513,27 @@ async function autoDetectShopIdActiveTab() {
         }
       });
 
-      if (shopId || storeName) {
-        if (storeName) {
-          const registered = await isStoreRegistered(storeName);
-          if (!registered) {
-            setStatus("error", "❌", `Store "${storeName}" is not added in Merchemy OS. Please add it first.`, true);
-            return;
-          }
-        }
-        setStatus("success", "✅", `Detected from tab: ${storeName || "Unknown"} (${shopId || "Unknown"})`, true);
+      const currentStore = getEl("input-store").value.trim();
+      let isRegistered = true;
+      if (currentStore) {
+        isRegistered = await isStoreRegistered(currentStore);
+        updateStoreWarningUI(currentStore, isRegistered);
       } else {
+        updateStoreWarningUI("", true);
+      }
+
+      if (!shopId && !storeName) {
         setStatus("error", "❌", "Could not find shop info on this page.", true);
+      } else {
+        setStatus("info", "🔍", "Navigate to any Etsy page, then click Fetch Orders.");
       }
     }
   } catch (err) {
+    const currentStore = getEl("input-store").value.trim();
+    if (currentStore) {
+      const isRegistered = await isStoreRegistered(currentStore);
+      updateStoreWarningUI(currentStore, isRegistered);
+    }
     setStatus("error", "❌", "Failed to detect shop info.", true);
   }
 }
@@ -507,12 +544,55 @@ function bindMainEvents() {
   getEl("btn-scrape").addEventListener("click", onScrape);
   getEl("btn-push").addEventListener("click", onPush);
   getEl("btn-clear").addEventListener("click", clearPreview);
+  
+  const btnCancelAction = getEl("btn-cancel-action");
+  if (btnCancelAction) {
+    btnCancelAction.addEventListener("click", () => {
+      if (isCancelling) return;
+      isCancelling = true;
+      btnCancelAction.textContent = "Cancelling...";
+      btnCancelAction.disabled = true;
+
+      if (currentAction === "scrape") {
+        chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+          if (tab) {
+            chrome.tabs.sendMessage(tab.id, { type: "CANCEL_SCRAPE" });
+            setStatus("loading", "⏳", "Cancelling scrape process...");
+          }
+        });
+      } else if (currentAction === "push") {
+        chrome.runtime.sendMessage({ type: "CANCEL_PUSH" });
+        setStatus("loading", "⏳", "Cancelling push process...");
+      }
+    });
+  }
+
   getEl("btn-detect-shop").addEventListener("click", async () => {
     const btn = getEl("btn-detect-shop");
     btn.textContent = "Detecting...";
     await forceDetectShopInfo(false);
     btn.textContent = "Auto Detect";
   });
+  
+  const btnRecheck = getEl("btn-recheck-store");
+  if (btnRecheck) {
+    btnRecheck.addEventListener("click", async () => {
+      const storeName = getEl("input-store").value.trim();
+      if (!storeName) return;
+      btnRecheck.textContent = "Checking...";
+      btnRecheck.disabled = true;
+      
+      const registered = await isStoreRegistered(storeName);
+      updateStoreWarningUI(storeName, registered);
+      
+      if (registered) {
+        setStatus("success", "✅", `Store "${storeName}" checked successfully!`, true);
+      }
+      
+      btnRecheck.textContent = "Re-check";
+      btnRecheck.disabled = false;
+    });
+  }
 
   getEl("select-order-state").addEventListener("change", (e) => {
     const orderStateId = e.target.value;
@@ -542,14 +622,23 @@ function bindMainEvents() {
   getEl("input-shopid").addEventListener("change", () => {
     storage.set({ shopId: getEl("input-shopid").value.trim() });
   });
-  getEl("input-store").addEventListener("change", () => {
-    storage.set({ defaultStore: getEl("input-store").value.trim() });
+  getEl("input-store").addEventListener("change", async () => {
+    const storeName = getEl("input-store").value.trim();
+    storage.set({ defaultStore: storeName });
+    if (storeName) {
+      const registered = await isStoreRegistered(storeName);
+      updateStoreWarningUI(storeName, registered);
+      
+      setStatus("info", "🔍", "Navigate to any Etsy page, then click Fetch Orders.");
+    } else {
+      updateStoreWarningUI("", true);
+    }
   });
 
   getEl("select-order-state").addEventListener("change", (e) => {
     storage.set({ orderStateId: e.target.value });
     const selectedOpt = e.target.options[e.target.selectedIndex];
-    const isCompleted = selectedOpt && selectedOpt.textContent.toLowerCase().includes("completed");
+    const isCompleted = selectedOpt && (selectedOpt.textContent.toLowerCase().includes("completed") || selectedOpt.textContent.toLowerCase().includes("finish"));
     const tfGroup = getEl("timeframe-group");
     if (tfGroup) {
       if (isCompleted && e.isTrusted) {
@@ -852,7 +941,7 @@ function bindMainEvents() {
 async function onScrape() {
   setStatus("loading", "⏳", "Connecting to Etsy API…");
   getEl("btn-scrape").disabled = true;
-  showProgress();
+  showProgress('scrape');
 
   try {
     const [tab] = await chrome.tabs.query({
@@ -908,20 +997,26 @@ async function onScrape() {
 
     scrapedOrders = response.orders;
 
+    const isCompletedTab = orderStateLabel.toLowerCase().includes('completed') || orderStateLabel.toLowerCase().includes('finish');
+    const timeInfo = isCompletedTab ? `, Time: ${timeframeValue}` : '';
+
     if (scrapedOrders.length === 0) {
-      setStatus("error", "⚠️", "No open orders found for this shop.", true);
+      setStatus("error", "⚠️", "No orders found for this shop.", true);
+      addSystemLog("info", `[Scrape] Fetched 0 orders (Tab: ${orderStateLabel}${timeInfo})`);
       return;
     }
 
     renderPreview(scrapedOrders);
-    setStatus(
-      "success",
-      "✅",
-      `${scrapedOrders.length} / ${response.total} orders fetched.`,
-      true
-    );
+    
+    if (isCancelling) {
+      setStatus("info", "⚠️", `Scrape cancelled. Fetched ${scrapedOrders.length} orders.`, true);
+      addSystemLog("info", `[Scrape] Cancelled. Fetched ${scrapedOrders.length} orders (Tab: ${orderStateLabel}${timeInfo})`);
+    } else {
+      setStatus("success", "✅", `${scrapedOrders.length} / ${response.total} orders fetched.`, true);
+      addSystemLog("info", `[Scrape] Successfully fetched ${scrapedOrders.length}/${response.total} orders (Tab: ${orderStateLabel}${timeInfo})`);
+    }
+
     getEl("btn-push").disabled = false;
-    addSystemLog("info", `[Manual Scrape] Successfully fetched ${scrapedOrders.length}/${response.total} orders`);
   } catch (err) {
     setStatus("error", "❌", `Error: ${err.message}`, true);
     addSystemLog("error", `[Manual Scrape] Scrape error: ${err.message}`);
@@ -938,7 +1033,7 @@ async function onPush() {
 
   getEl("btn-push").disabled = true;
   getEl("btn-scrape").disabled = true;
-  showProgress();
+  showProgress('push');
   setStatus(
     "loading",
     "🚀",
@@ -950,28 +1045,29 @@ async function onPush() {
     (response) => {
       hideProgress();
       if (response?.ok) {
-        setStatus(
-          "success",
-          "🎉",
-          `Pushed ${response.result.pushed} orders to Merchemy OS!`,
-          true
-        );
-        addSystemLog("success", `[Manual Push] Successfully pushed ${response.result.pushed} orders.`);
-        scrapedOrders = [];
-        clearPreview();
-        getEl("btn-push").disabled = true;
+        const pushedCount = response.result?.pushed || 0;
+        
+        if (isCancelling && pushedCount < scrapedOrders.length) {
+          scrapedOrders = scrapedOrders.slice(pushedCount);
+          renderPreview(scrapedOrders);
+          setStatus("info", "⚠️", `Push cancelled. Pushed ${pushedCount} orders.`, true);
+          addSystemLog("info", `[Push] Cancelled. Pushed ${pushedCount} orders.`);
+          getEl("btn-push").disabled = false;
+        } else {
+          scrapedOrders = [];
+          clearPreview();
+          setStatus("success", "🎉", `Pushed ${pushedCount} orders to Merchemy OS!`, true);
+          addSystemLog("success", `[Push] Successfully pushed ${pushedCount} orders.`);
+          getEl("btn-push").disabled = true;
+        }
       } else {
         const errMsg = `Push failed: ${response?.error || "Unknown error"}`;
-        setStatus(
-          "error",
-          "❌",
-          errMsg,
-          true
-        );
-        addSystemLog("error", `[Manual Push] ${errMsg}`);
+        setStatus("error", "❌", errMsg, true);
+        addSystemLog("error", `[Push] ${errMsg}`);
         getEl("btn-push").disabled = false;
       }
       getEl("btn-scrape").disabled = false;
+      isCancelling = false;
     },
   );
 }
@@ -1010,7 +1106,7 @@ function clearPreview() {
   setStatus(
     "info",
     "🔍",
-    "Ready. Navigate to any Etsy page, then click Fetch Orders.",
+    "Navigate to any Etsy page, then click Fetch Orders.",
   );
 }
 
@@ -1031,16 +1127,27 @@ function setStatus(type, icon, text, autoClear = false) {
   
   if (autoClear) {
     statusTimeout = setTimeout(() => {
-      setStatus("info", "🔍", "Ready. Navigate to any Etsy page, then click Fetch Orders.");
+      setStatus("info", "🔍", "Navigate to any Etsy page, then click Fetch Orders.");
     }, 3000);
   }
 }
 
-function showProgress() {
+function showProgress(actionType) {
+  isCancelling = false;
+  currentAction = actionType;
+  const btnCancel = getEl("btn-cancel-action");
+  if(btnCancel) {
+    btnCancel.textContent = "Cancel";
+    btnCancel.disabled = false;
+  }
   getEl("progress-wrap").style.display = "flex";
+  const spinner = getEl("progress-spinner");
+  if (spinner) spinner.classList.add("active");
   updateProgress(0);
 }
 function hideProgress() {
+  const spinner = getEl("progress-spinner");
+  if (spinner) spinner.classList.remove("active");
   setTimeout(() => {
     getEl("progress-wrap").style.display = "none";
   }, 1500);
