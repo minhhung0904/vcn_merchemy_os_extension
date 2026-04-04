@@ -16,7 +16,7 @@
     'https://www.etsy.com/api/v3/ajax/bespoke/shop';
 
   const DEFAULT_LIMIT = 50; // Etsy allows up to 100 per page
-  const DEFAULT_ORDER_STATE = '1347445165725'; // empty = all states, 1347445165725 = completed (last 90 days)
+  const DEFAULT_ORDER_STATE = ''; // empty = all states
 
   // ─── Get Shop (Business) ID ───────────────────────────────────────────────────
   // Etsy embeds the shop ID in multiple places on the page.
@@ -63,13 +63,13 @@
 
   // ─── Build API URL ────────────────────────────────────────────────────────────
 
-  function buildApiUrl(shopId, offset = 0, limit = DEFAULT_LIMIT, orderStateId = DEFAULT_ORDER_STATE) {
+  function buildApiUrl(shopId, offset = 0, limit = DEFAULT_LIMIT, orderStateId = DEFAULT_ORDER_STATE, orderStateLabel = '', timeframeValue = 'last_90_days') {
     let sortBy = 'ship_date';
     let sortOrder = 'desc';
     let completedDate = 'all';
 
-    const isNew = String(orderStateId) === '1347445165681';
-    const isCompleted = String(orderStateId) === '1347445165725';
+    const isNew = orderStateLabel.toLowerCase().includes('new');
+    const isCompleted = orderStateLabel.toLowerCase().includes('completed');
 
     if (isNew) {
       sortBy = 'expected_ship_date';
@@ -78,7 +78,7 @@
     } else if (isCompleted) {
       sortBy = 'ship_date';
       sortOrder = 'desc';
-      completedDate = 'last_90_days';
+      completedDate = timeframeValue;
     }
 
     const params = new URLSearchParams({
@@ -150,7 +150,7 @@
 
     return {
       pageGuid: pageGuid || '1024fa296596.7d7de2f619857ec9e7e3.00',
-      orderStateId: orderStateId || fallbackStateId || '1347445165725',
+      orderStateId: orderStateId || fallbackStateId || '',
       detectedLocale: detectedLocale || 'NZD|en-GB|NZ'
     };
   }
@@ -320,16 +320,16 @@
   }
 
   async function fetchOrderPage(shopId, offset, limit, ctx) {
-    const { orderStateId, pageGuid, detectedLocale } = ctx;
-    const url = buildApiUrl(shopId, offset, limit, orderStateId);
+    const { orderStateId, pageGuid, detectedLocale, orderStateLabel = '', timeframeValue = 'last_90_days' } = ctx;
+    const url = buildApiUrl(shopId, offset, limit, orderStateId, orderStateLabel, timeframeValue);
     const deviceHeaders = await getDeviceHeaders();
     // State-specific headers
-    const isNew = String(orderStateId) === '1347445165681'; 
-    const isCompleted = String(orderStateId) === '1347445165725';
+    const isNew = orderStateLabel.toLowerCase().includes('new'); 
+    const isCompleted = orderStateLabel.toLowerCase().includes('completed');
     
     const referer = isNew 
       ? 'https://www.etsy.com/your/orders/sold/new?ref=seller-platform-mcnav'
-      : 'https://www.etsy.com/your/orders/sold/completed?ref=seller-platform-mcnav&completed_date=last_90_days';
+      : `https://www.etsy.com/your/orders/sold/completed?ref=seller-platform-mcnav&completed_date=${timeframeValue}`;
 
     const headers = {
       ...deviceHeaders,
@@ -524,6 +524,7 @@
         phone,
         buyerNote,
         orderStateId:    orderCtx.orderStateId,
+        orderStateLabel: orderCtx.orderStateLabel,
       }, shipment)
     );
 
@@ -621,7 +622,7 @@
       // Cost defaults
       baseCost:   0,
       costSource: null,
-      status:     orderCtx.orderStateId === '1347445165725' ? 'Completed' : 'New',
+      status:     orderCtx.orderStateLabel?.toLowerCase().includes('completed') ? 'Completed' : 'New',
     };
   }
 
@@ -660,6 +661,8 @@
       }
 
       const ctx = getDynamicContext(message.orderStateId || DEFAULT_ORDER_STATE);
+      ctx.orderStateLabel = message.orderStateLabel || '';
+      ctx.timeframeValue = message.timeframeValue || 'last_90_days';
 
       // 2. Fetch one page first to get total count and first batch
       const firstPage = await fetchOrderPage(shopId, 0, DEFAULT_LIMIT, ctx);
@@ -708,7 +711,7 @@
       // 4. If Completed state, fetch shipment info separately
       let shipments = {};
       const orderStateId = message.orderStateId || DEFAULT_ORDER_STATE;
-      const isCompleted = String(orderStateId) === '1347445165725';
+      const isCompleted = message.orderStateLabel?.toLowerCase().includes('completed');
 
       if (isCompleted && allRawOrders.length > 0) {
         const orderIds = allRawOrders.map(o => String(getV(o, 'order_id', 'orderId')));
@@ -718,7 +721,7 @@
       // 5. Map everything
       const buyerMap = buildBuyerMap(allBuyers);
       const allMapped = allRawOrders.map(o =>
-        mapOrder(o, buyerMap, message.storeName, { orderStateId, shipments })
+        mapOrder(o, buyerMap, message.storeName, { orderStateId, orderStateLabel: message.orderStateLabel || '', shipments })
       );
 
       sendResponse({

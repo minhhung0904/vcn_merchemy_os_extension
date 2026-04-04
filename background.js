@@ -38,11 +38,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ─── Push orders to Merchemy OS ───────────────────────────────────────────────
 
 async function handlePushOrders(orders) {
-  const { apiUrl, authToken } = await getSettings();
+  const { apiUrl, authToken, defaultStore } = await getSettings();
 
   if (!authToken)
     throw new Error("Not logged in. Please sign in via the extension popup.");
   if (!orders?.length) throw new Error("No orders to push.");
+
+  const storeName = defaultStore || orders[0]?.storeName;
+  if (storeName) {
+    const isRegistered = await checkStoreRegistered(storeName, apiUrl, authToken);
+    if (!isRegistered) {
+      throw new Error(`Store "${storeName}" does not exist in the system. Please add this Store to Merchemy OS first.`);
+    }
+  }
 
   const CHUNK_SIZE = 50;
   let pushed = 0;
@@ -86,9 +94,36 @@ function getSettings() {
       resolve({
         apiUrl: data.apiUrl || DEFAULT_API_URL,
         authToken: data.authToken || "",
+        defaultStore: data.defaultStore || "",
       });
     });
   });
+}
+
+async function addSystemLog(type, message) {
+  const { systemLogs = [] } = await new Promise((res) => chrome.storage.local.get("systemLogs", res));
+  systemLogs.unshift({ time: new Date().toISOString(), type, message });
+  if (systemLogs.length > 50) systemLogs.pop();
+  await new Promise((res) => chrome.storage.local.set({ systemLogs }, res));
+}
+
+async function checkStoreRegistered(storeName, apiUrl, authToken) {
+  if (!storeName) return true;
+  try {
+    const url = (apiUrl || "http://localhost:3000/api/v2") + "/stores";
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${authToken}`
+      }
+    });
+    if (!res.ok) return true; // Ignore validation if API is unreachable
+    const stores = await res.json();
+    return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");
+  } catch (e) {
+    return true; // Ignore if network disconnects
+  }
 }
 
 // ─── Auto-Sync (Custom Schedule) ────────────────────────────────────────────────
@@ -105,7 +140,6 @@ async function setupSyncAlarm() {
   const { autoSyncEnabled, syncMode, syncTime, syncHours, syncStartTime } = await new Promise((res) => chrome.storage.local.get(["autoSyncEnabled", "syncMode", "syncTime", "syncHours", "syncStartTime"], res));
   
   await chrome.alarms.clear("autoSync");
-  await chrome.alarms.clear("midnightSync"); // cleanup old
   
   if (autoSyncEnabled === false) {
     console.log("[Auto-Sync] Disabled by user.");
@@ -153,19 +187,16 @@ async function setupSyncAlarm() {
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === "autoSync" || alarm.name === "midnightSync") {
+  if (alarm.name === "autoSync") {
     console.log("[Auto-Sync] Firing sync alarm...");
-    const { shopId, defaultStore, autoSyncEnabled, orderStates } = await new Promise((res) => chrome.storage.local.get(["shopId", "defaultStore", "autoSyncEnabled", "orderStates"], res));
+    const { shopId, defaultStore, autoSyncEnabled, orderStates, completedTimeframe } = await new Promise((res) => chrome.storage.local.get(["shopId", "defaultStore", "autoSyncEnabled", "orderStates", "completedTimeframe"], res));
     
     if (autoSyncEnabled === false) {
       console.log("[Auto-Sync] Aborted. Auto-sync is disabled by user.");
       return;
     }
 
-    if (!shopId) {
-      console.log("[Auto-Sync] Aborted. No shopId stored in extension.");
-      return;
-    }
+    // shopId will be detected later if missing
     
     try {
       // 1. Find an existing Etsy tab to perform the scrape in the 'web' context
@@ -200,11 +231,107 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       }).catch(() => {});
 
       // Find "New" state from saved orderStates
-      let targetOrderStateId = "1347445165681"; // Fallback to Etsy's standard 'New' ID
+      let targetOrderStateId = "";
+      let targetOrderStateLabel = "";
       if (orderStates && Array.isArray(orderStates)) {
         const newState = orderStates.find(s => s.label && s.label.toLowerCase().includes('new'));
         if (newState && newState.id) {
           targetOrderStateId = String(newState.id);
+          targetOrderStateLabel = newState.label;
+        }
+      }
+
+      if (!shopId || !targetOrderStateId) {
+        console.log("[Auto-Sync] Missing Shop ID or Order State ID. Attempting to detect on active tab...");
+        try {
+          // 1. Detect Shop Info
+          const [shopResult] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              function getDetectedShopId() {
+                const metaShopId = document.querySelector('meta[name="shop-id"]');
+                if (metaShopId?.content) return metaShopId.content;
+                try {
+                  const globals = window.__reactPageGlobals || window.__page_globals || {};
+                  if (globals.shop_id) return String(globals.shop_id);
+                  if (globals.business_id) return String(globals.business_id);
+                } catch (_) {}
+                try { if (window.etsy?.Session?.shopId) return String(window.etsy.Session.shopId); } catch (_) {}
+                const mcLinks = Array.from(document.querySelectorAll('a[href*="mission-control"], script')).map(el => el.href || el.src || el.textContent || '').join(' ');
+                const mcMatch = mcLinks.match(/\/shop\/(\d+)\//);
+                if (mcMatch) return mcMatch[1];
+                const urlMatch = window.location.href.match(/\/shop\/(\d+)\//);
+                if (urlMatch) return urlMatch[1];
+                const scripts = document.querySelectorAll('script[type="application/json"], script:not([src])');
+                for (const s of scripts) {
+                  const m = s.textContent.match(/"business_id"\s*:\s*(\d+)/);
+                  if (m) return m[1];
+                  const m2 = s.textContent.match(/"shop_id"\s*:\s*(\d+)/);
+                  if (m2) return m2[1];
+                }
+                return null;
+              }
+              const dShopId = getDetectedShopId();
+              let dStoreName = "";
+              try {
+                const globals = window.__reactPageGlobals || window.__page_globals || {};
+                if (globals.shop_name) dStoreName = String(globals.shop_name);
+              } catch (_) {}
+              if (!dStoreName) {
+                 const scripts = document.querySelectorAll('script');
+                 for (const s of scripts) {
+                   const nameM = s.textContent.match(/"shop_name"\s*:\s*"([^"]+)"/);
+                   if (nameM) { dStoreName = nameM[1]; break; }
+                 }
+              }
+              return { detectedShopId: dShopId, detectedStoreName: dStoreName };
+            }
+          });
+
+          if (shopResult?.result) {
+            const { detectedShopId, detectedStoreName } = shopResult.result;
+            if (detectedShopId) {
+              shopId = detectedShopId;
+              defaultStore = detectedStoreName || defaultStore || "Etsy Shop";
+              await chrome.storage.local.set({ shopId, defaultStore });
+              console.log("[Auto-Sync] Successfully auto-detected Shop ID:", shopId);
+            }
+          }
+
+          // 2. Detect Order States
+          const detectRes = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tab.id, { type: "GET_ORDER_STATES" }, (res) => resolve(res || {}));
+          });
+          
+          if (detectRes.ok && detectRes.states) {
+            const detectedNew = detectRes.states.find(s => s.label.toLowerCase().includes('new'));
+            if (detectedNew && detectedNew.id) {
+               targetOrderStateId = String(detectedNew.id);
+               targetOrderStateLabel = detectedNew.label;
+               
+               let updatedStates = (orderStates && Array.isArray(orderStates) && orderStates.length >= 2) 
+                  ? orderStates 
+                  : [{ id: '', label: 'New' }, { id: '', label: 'Completed' }];
+               
+               const stateToUpdate = updatedStates.find(s => s.label === 'New');
+               if (stateToUpdate) stateToUpdate.id = targetOrderStateId;
+               
+               const detectedCompleted = detectRes.states.find(s => s.label.toLowerCase().includes('completed'));
+               if (detectedCompleted && detectedCompleted.id) {
+                 const completedState = updatedStates.find(s => s.label === 'Completed');
+                 if (completedState) completedState.id = String(detectedCompleted.id);
+               }
+               
+               await chrome.storage.local.set({ orderStates: updatedStates });
+               console.log("[Auto-Sync] Successfully auto-detected Order States.");
+            }
+          }
+        } catch(e) {
+          console.error("[Auto-Sync] Lỗi khi detect thông tin:", e);
+        }
+
+        if (!shopId || !targetOrderStateId) {
+          throw new Error("[Auto-Sync] Failed to auto-detect Shop ID or Order State ID (New). Please detect manually on the Popup.");
         }
       }
 
@@ -214,7 +341,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
           type: "SCRAPE_ETSY_ORDERS",
           shopId,
           storeName: defaultStore || "Etsy Shop",
-          orderStateId: targetOrderStateId
+          orderStateId: targetOrderStateId,
+          orderStateLabel: targetOrderStateLabel,
+          timeframeValue: completedTimeframe || "last_90_days"
         }, (res) => {
           if (chrome.runtime.lastError) {
              resolve({ ok: false, error: chrome.runtime.lastError.message });
@@ -239,9 +368,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       if (orders.length > 0) {
         const result = await handlePushOrders(orders);
         console.log(`[Auto-Sync] Successfully pushed ${result.pushed} orders to Merchemy OS.`);
+        await addSystemLog("success", `[Auto-Sync] Successfully fetched and pushed ${result.pushed} orders (New state).`);
+      } else {
+        console.log(`[Auto-Sync] No new orders found.`);
+        await addSystemLog("info", `[Auto-Sync] No new orders found (New state).`);
       }
     } catch (err) {
       console.error("[Auto-Sync] Error during background sync:", err);
+      await addSystemLog("error", err.message || "Unknown error during auto fetch and push.");
     }
   }
 });

@@ -9,13 +9,21 @@ let lastSavedSettings = {};
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_ORDER_STATES = [
-  { id: '1347445165681', label: 'New' },
-  { id: '1347445165725', label: 'Completed' }
+  { id: '', label: 'New' },
+  { id: '', label: 'Completed' }
 ];
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
+  storage.get(["theme"]).then(res => {
+    if (res.theme === "light") {
+      document.body.classList.add("light-theme");
+      const themeBtn = document.getElementById("btn-theme-toggle");
+      if (themeBtn) themeBtn.checked = true;
+    }
+  });
+
   bindLoginEvents();
   bindOrgEvents();
   bindMainEvents();
@@ -256,6 +264,14 @@ async function saveAuth(token, email, orgName) {
   });
 }
 
+// ─── Logging Utility ────────────────────────────────────────────────────────
+async function addSystemLog(type, message) {
+  const { systemLogs = [] } = await storage.get(["systemLogs"]);
+  systemLogs.unshift({ time: new Date().toISOString(), type, message });
+  if (systemLogs.length > 50) systemLogs.pop();
+  await storage.set({ systemLogs });
+}
+
 // ─── Logout ───────────────────────────────────────────────────────────────────
 
 document.getElementById("btn-logout").addEventListener("click", async () => {
@@ -275,14 +291,19 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
 // ─── Main prefs ───────────────────────────────────────────────────────────────
 
 async function loadMainPrefs() {
-  const { defaultStore, shopId, orderStateId, orderStates } = await storage.get([
+  const { defaultStore, shopId, orderStateId, orderStates, completedTimeframe } = await storage.get([
     "defaultStore",
     "shopId",
     "orderStateId",
-    "orderStates"
+    "orderStates",
+    "completedTimeframe"
   ]);
   if (defaultStore) getEl("input-store").value = defaultStore;
   if (shopId) getEl("input-shopid").value = shopId;
+  if (completedTimeframe) {
+    const tf = getEl("select-timeframe");
+    if (tf) tf.value = completedTimeframe;
+  }
   
   // Use defaults if none saved, but filter to only show "New" and "Completed"
   const statesToRender = (orderStates && orderStates.length > 0) ? orderStates : DEFAULT_ORDER_STATES;
@@ -293,8 +314,8 @@ function renderOrderStates(states, selectedId) {
   const select = getEl("select-order-state");
   if (!select) return;
   
-  // Reset with empty default option
-  select.innerHTML = '<option value="">Select Order State (Optional)</option>';
+  // Reset select options
+  select.innerHTML = '';
   
   // Filter for only New and Completed labels (case-insensitive)
   const allowedLabels = ['new', 'completed'];
@@ -305,10 +326,12 @@ function renderOrderStates(states, selectedId) {
   filteredStates.forEach(s => {
     const opt = document.createElement("option");
     opt.value = s.id;
-    opt.textContent = `${s.label} (${s.id})`;
+    opt.textContent = s.label;
     if (String(s.id) === String(selectedId)) opt.selected = true;
     select.appendChild(opt);
   });
+  
+  select.dispatchEvent(new Event("change"));
 }
  
 async function isStoreRegistered(storeName) {
@@ -523,8 +546,22 @@ function bindMainEvents() {
     storage.set({ defaultStore: getEl("input-store").value.trim() });
   });
 
-  getEl("select-order-state").addEventListener("change", () => {
-    storage.set({ orderStateId: getEl("select-order-state").value });
+  getEl("select-order-state").addEventListener("change", (e) => {
+    storage.set({ orderStateId: e.target.value });
+    const selectedOpt = e.target.options[e.target.selectedIndex];
+    const isCompleted = selectedOpt && selectedOpt.textContent.toLowerCase().includes("completed");
+    const tfGroup = getEl("timeframe-group");
+    if (tfGroup) {
+      if (isCompleted && e.isTrusted) {
+        getEl("select-timeframe").value = "last_30_days";
+        storage.set({ completedTimeframe: "last_30_days" });
+      }
+      tfGroup.style.display = isCompleted ? "block" : "none";
+    }
+  });
+
+  getEl("select-timeframe").addEventListener("change", (e) => {
+    storage.set({ completedTimeframe: e.target.value });
   });
 
   // Persist auto-sync setting
@@ -575,6 +612,41 @@ function bindMainEvents() {
   };
 
   if (toggleAutoSync) {
+    const displayWrapper = getEl("autosync-display");
+    const editorWrapper = getEl("autosync-editor");
+
+    const openEditor = () => {
+      if (displayWrapper) displayWrapper.style.display = "none";
+      if (editorWrapper) editorWrapper.style.display = "flex";
+    };
+
+    const closeEditor = () => {
+      if (editorWrapper) editorWrapper.style.display = "none";
+      if (displayWrapper) displayWrapper.style.display = "flex";
+    };
+
+    const btnEditSync = getEl("btn-edit-sync");
+    if (btnEditSync) btnEditSync.addEventListener("click", openEditor);
+
+    const btnCancelSync = getEl("btn-cancel-sync");
+    if (btnCancelSync) {
+      btnCancelSync.addEventListener("click", () => {
+        if (!lastSavedSettings) { closeEditor(); return; }
+        toggleAutoSync.checked = lastSavedSettings.autoSyncEnabled !== false;
+        modeSelect.value = lastSavedSettings.syncMode || "daily";
+        hoursInput.value = lastSavedSettings.syncHours || "4";
+        
+        const tTime = from24h(lastSavedSettings.syncTime || "00:00");
+        th.value = tTime.h; tm.value = tTime.m;
+        
+        const sTime = from24h(lastSavedSettings.syncStartTime || "00:00");
+        sh.value = sTime.h; sm.value = sTime.m;
+        
+        updateSyncUI();
+        closeEditor();
+      });
+    }
+
     storage.get(["autoSyncEnabled", "syncMode", "syncTime", "syncHours", "syncStartTime"]).then((res) => {
       toggleAutoSync.checked = res.autoSyncEnabled !== false;
       modeSelect.value = res.syncMode || "daily";
@@ -620,8 +692,8 @@ function bindMainEvents() {
 
     function updateSyncUI() {
       const isEnabled = toggleAutoSync.checked;
-      optionsDiv.style.display = isEnabled ? "flex" : "none";
       btnSaveSync.style.display = "block";
+      if (optionsDiv) optionsDiv.style.display = isEnabled ? "block" : "none";
       
       const card = getEl("sync-card");
       if (card) {
@@ -636,6 +708,20 @@ function bindMainEvents() {
         timeWrap.style.display = "none";
         hoursWrap.style.display = "flex";
       }
+
+      const displaySummary = getEl("autosync-summary");
+      if (displaySummary) {
+        if (!isEnabled) {
+          displaySummary.textContent = "OFF";
+        } else {
+          if (modeSelect.value === "daily") {
+             displaySummary.textContent = `ON (Daily at ${to24h(th.value, tm.value)})`;
+          } else {
+             displaySummary.textContent = `ON (Every ${hoursInput.value} hours from ${to24h(sh.value, sm.value)})`;
+          }
+        }
+      }
+
       checkChanges();
     }
 
@@ -683,10 +769,11 @@ function bindMainEvents() {
       btnSaveSync.textContent = "Saving...";
       saveSyncConfig().then(() => {
         setTimeout(() => { 
-          btnSaveSync.textContent = "Save Settings"; 
+          btnSaveSync.innerHTML = "<span>💾</span> Save Settings"; 
           checkChanges(); // Re-check after text change to ensure button goes back to disabled
-        }, 1000);
-        setStatus("success", "✅", "Settings saved successfully.", true);
+          closeEditor();
+        }, 800);
+        setStatus("success", "✅", "Auto-Sync configuration saved successfully.", true);
       });
     });
   }
@@ -701,6 +788,17 @@ function bindMainEvents() {
     });
   });
 
+  // Theme Toggle
+  const btnTheme = getEl("btn-theme-toggle");
+  if (btnTheme) {
+    btnTheme.addEventListener("change", (e) => {
+      const isLight = e.target.checked;
+      if (isLight) document.body.classList.add("light-theme");
+      else document.body.classList.remove("light-theme");
+      storage.set({ theme: isLight ? "light" : "dark" });
+    });
+  }
+
   // Progress from background / content script
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "FETCH_PROGRESS") {
@@ -713,6 +811,40 @@ function bindMainEvents() {
       updateProgress(pct, `Uploading ${msg.pushed}/${msg.total}…`);
     }
   });
+
+  // Logs event
+  const btnLogs = getEl("btn-logs");
+  const logsSection = getEl("logs-section");
+  const logsList = getEl("logs-list");
+  
+  if (btnLogs && logsSection && logsList) {
+    btnLogs.addEventListener("click", async () => {
+      const isHidden = logsSection.style.display === "none";
+      logsSection.style.display = isHidden ? "block" : "none";
+      if (isHidden) {
+        // load logs
+        const { systemLogs = [] } = await storage.get(["systemLogs"]);
+        logsList.innerHTML = "";
+        if (!systemLogs.length) {
+          logsList.innerHTML = "<li>No log data available.</li>";
+        } else {
+          systemLogs.forEach(lg => {
+             const li = document.createElement("li");
+             const timeStr = new Date(lg.time).toLocaleString('en-US');
+             let colorLine = "#ccc";
+             if (lg.type === "error") colorLine = "#ff6b6b";
+             if (lg.type === "success") colorLine = "#51cf66";
+             li.style.color = colorLine;
+             li.style.marginBottom = "4px";
+             li.style.borderBottom = "1px solid #333";
+             li.style.paddingBottom = "4px";
+             li.innerHTML = `<strong>[${timeStr}]</strong> ${lg.message}`;
+             logsList.appendChild(li);
+          });
+        }
+      }
+    });
+  }
 }
 
 // ─── Scrape ───────────────────────────────────────────────────────────────────
@@ -736,9 +868,12 @@ async function onScrape() {
     const shopId = getEl("input-shopid").value.trim();
     const storeName = getEl("input-store").value.trim();
     const orderStateId = getEl("select-order-state").value;
+    const selectedOpt = getEl("select-order-state").options[getEl("select-order-state").selectedIndex];
+    const orderStateLabel = selectedOpt ? selectedOpt.textContent : '';
+    const timeframeValue = getEl("select-timeframe") ? getEl("select-timeframe").value : 'last_90_days';
 
     if (!orderStateId) {
-      setStatus("error", "❌", "Please detect or select an Order State first.", true);
+      setStatus("error", "❌", "Please auto-detect store info before fetching orders.", true);
       getEl("btn-scrape").disabled = false;
       return;
     }
@@ -746,7 +881,9 @@ async function onScrape() {
     if (storeName) {
       const registered = await isStoreRegistered(storeName);
       if (!registered) {
-        setStatus("error", "❌", `Store "${storeName}" is not added in Merchemy OS. Please add it first.`, true);
+        const errMsg = `Store "${storeName}" is not added in Merchemy OS. Please add it first.`;
+        setStatus("error", "❌", errMsg, true);
+        addSystemLog("error", `[Manual Scrape] ` + errMsg);
         return;
       }
     }
@@ -763,6 +900,8 @@ async function onScrape() {
       shopId,
       storeName,
       orderStateId,
+      orderStateLabel,
+      timeframeValue,
     });
 
     if (!response?.ok) throw new Error(response?.error || "Scrape failed");
@@ -782,8 +921,10 @@ async function onScrape() {
       true
     );
     getEl("btn-push").disabled = false;
+    addSystemLog("info", `[Manual Scrape] Successfully fetched ${scrapedOrders.length}/${response.total} orders`);
   } catch (err) {
     setStatus("error", "❌", `Error: ${err.message}`, true);
+    addSystemLog("error", `[Manual Scrape] Scrape error: ${err.message}`);
   } finally {
     getEl("btn-scrape").disabled = false;
     hideProgress();
@@ -815,16 +956,19 @@ async function onPush() {
           `Pushed ${response.result.pushed} orders to Merchemy OS!`,
           true
         );
+        addSystemLog("success", `[Manual Push] Successfully pushed ${response.result.pushed} orders.`);
         scrapedOrders = [];
         clearPreview();
         getEl("btn-push").disabled = true;
       } else {
+        const errMsg = `Push failed: ${response?.error || "Unknown error"}`;
         setStatus(
           "error",
           "❌",
-          `Push failed: ${response?.error || "Unknown error"}`,
+          errMsg,
           true
         );
+        addSystemLog("error", `[Manual Push] ${errMsg}`);
         getEl("btn-push").disabled = false;
       }
       getEl("btn-scrape").disabled = false;

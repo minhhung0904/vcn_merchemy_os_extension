@@ -17,6 +17,19 @@
   --radius-sm: 6px;
 }
 
+body.light-theme {
+  --bg:       #f8fafc;
+  --surface:  #ffffff;
+  --surface2: #f1f5f9;
+  --border:   #e2e8f0;
+  --accent:   #4f46e5;
+  --accent2:  #6366f1;
+  --green:    #10b981;
+  --red:      #ef4444;
+  --text:     #1e293b;
+  --muted:    #64748b;
+}
+
 body {
   font-family: 'Inter', sans-serif;
   background: var(--bg);
@@ -251,6 +264,88 @@ body {
 }
 input:checked + .slider { background-color: var(--accent); }
 input:checked + .slider:before { transform: translateX(16px); }
+
+/* Custom Theme Switch (Sun/Moon) */
+.theme-toggle {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 24px;
+  border-radius: 24px;
+  cursor: pointer;
+  background-color: #152238; /* Night sky */
+  box-shadow: inset 0px 4px 6px rgba(0,0,0,0.4), inset 0px -2px 4px rgba(255,255,255,0.05);
+  transition: background-color 0.4s ease;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.theme-toggle input { display: none; }
+.theme-toggle .slider {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: #e8e8ea; /* Moon */
+  box-shadow: inset -2px -2px 3px -1px #8983f7, inset -6px -2px 0 0 #c2c2cf;
+  transition: transform 0.4s ease, background-color 0.4s ease, box-shadow 0.4s;
+  z-index: 2;
+}
+.theme-toggle .slider::before {
+  content: "";
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background-color: #9d9fb1;
+  box-shadow: 5px 2px 0 0px #9d9fb1, 2px 5px 0 -0.5px #9d9fb1;
+  transition: opacity 0.3s;
+}
+/* Stars */
+.theme-toggle::before {
+  content: "";
+  position: absolute;
+  width: 1.5px; height: 1.5px;
+  background: white;
+  border-radius: 50%;
+  left: 14px; top: 8px;
+  box-shadow: 4px -4px 0 0.5px white, 10px 4px 0 0px white, 16px -2px 0 -0.5px white;
+  transition: all 0.4s ease;
+}
+.theme-toggle::after {
+  content: "";
+  position: absolute;
+  transition: all 0.4s ease;
+}
+
+/* Light Theme overrides */
+body.light-theme .theme-toggle {
+  background-color: #7abae2; /* Day sky */
+  box-shadow: inset 0px 4px 6px rgba(0,0,0,0.1), inset 0px -2px 4px rgba(255,255,255,0.3);
+}
+body.light-theme .theme-toggle .slider {
+  transform: translateX(24px);
+  background-color: #ffcf33; /* Sun */
+  box-shadow: 0 0 10px rgba(255, 207, 51, 0.8), inset -3px -3px 4px -1px #d4a700;
+}
+body.light-theme .theme-toggle .slider::before { opacity: 0; }
+body.light-theme .theme-toggle::before {
+  /* Cloud base */
+  width: 14px; height: 5px;
+  background: white;
+  border-radius: 10px;
+  left: 10px; top: 12px;
+  box-shadow: none;
+}
+body.light-theme .theme-toggle::after {
+  /* Cloud bumps */
+  width: 6px; height: 6px;
+  background: white;
+  border-radius: 50%;
+  left: 12px; top: 8px;
+  box-shadow: 5px 1px 0 1px white;
+}
 
 .sync-options-inner {
   padding-top: 5px;

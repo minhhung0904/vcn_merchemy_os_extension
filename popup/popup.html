@@ -87,7 +87,11 @@
           </div>
           <span class="user-badge" id="user-badge"></span>
         </div>
-        <button class="btn-icon" id="btn-logout" title="Sign out" style="color: #fff;">
+        <label class="theme-toggle" title="Toggle Theme" style="margin-right: 8px;">
+          <input type="checkbox" id="btn-theme-toggle">
+          <div class="slider"></div>
+        </label>
+        <button class="btn-icon" id="btn-logout" title="Sign out" style="color: var(--text);">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
         </button>
       </div>
@@ -98,7 +102,7 @@
       <label class="label">Platform</label>
       <div class="platform-tabs">
         <button class="platform-tab active" data-platform="etsy">Etsy</button>
-        <button class="platform-tab disabled" data-platform="other" title="Coming soon">Other Platforms <br> Comming soon...</button>
+        <button class="platform-tab disabled" data-platform="other" title="Coming soon">Other Platforms <br> Coming soon...</button>
       </div>
     </section>
     
@@ -115,37 +119,54 @@
       <div class="field-group" style="margin-top: 10px;">
         <label class="label" for="select-order-state">Order State</label>
         <select id="select-order-state" class="input">
-          <option value="">Select Order State (Optional)</option>
+        </select>
+      </div>
+      <div class="field-group" id="timeframe-group" style="margin-top: 10px; display: none;">
+        <label class="label" for="select-timeframe" style="display: block; margin-bottom: 6px;">Completed Date</label>
+        <select id="select-timeframe" class="input">
+          <option value="all">All</option>
+          <option value="last_30_days" selected>Last 30 days</option>
+          <option value="last_90_days">Last 90 days</option>
+          <option value="last_365_days">Last 365 days</option>
         </select>
       </div>
     </section>
 
     <!-- Auto Sync Settings -->
     <section class="section">
-      <div id="sync-card" class="sync-card">
-        <div class="sync-header">
-          <div class="sync-title">
-            <span>🔄</span> Auto-Sync Settings
+      <div id="sync-card" class="sync-card active">
+        <!-- Display Mode -->
+        <div id="autosync-display" style="display: flex; justify-content: space-between; align-items: center; padding: 4px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+             <div class="sync-title" style="margin: 0;"><span>🔄</span> Auto-Sync</div>
+             <div id="autosync-summary" style="font-size: 12px; color: var(--muted);">OFF</div>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="toggle-autosync">
-            <span class="slider"></span>
-          </label>
+          <button id="btn-edit-sync" class="btn-link" style="font-size: 13px; margin: 0; padding: 4px 8px;">Edit</button>
         </div>
 
-        <div id="autosync-options" style="display: none; flex-direction: column; gap: 12px;">
-          <div class="sync-options-inner">
+        <!-- Editor Mode -->
+        <div id="autosync-editor" style="display: none; flex-direction: column; gap: 12px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 5px;">
+          
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <span style="font-size: 14px; font-weight: 500;">Enable Auto-Sync</span>
+            <label class="switch">
+              <input type="checkbox" id="toggle-autosync">
+              <span class="slider"></span>
+            </label>
+          </div>
+          
+          <div class="sync-options-inner" id="autosync-options" style="display: none;">
             <!-- Frequency -->
             <div class="option-row">
               <label class="option-label" for="sync-mode">⚡ Frequency</label>
               <select id="sync-mode" class="input">
-                <option value="daily">Daily at specific time</option>
-                <option value="hourly">Every N hours</option>
+                <option value="daily">Daily</option>
+                <option value="hourly">Hourly</option>
               </select>
             </div>
             
             <!-- Daily Time -->
-            <div id="sync-time-wrap" class="option-row">
+            <div id="sync-time-wrap" class="option-row" style="margin-top: 10px;">
               <label class="option-label">🕒 Target Time</label>
               <div style="display: flex; gap: 8px; align-items: center;">
                 <select id="sync-time-h" class="input" style="width: 70px;"></select>
@@ -155,7 +176,7 @@
             </div>
             
             <!-- Hourly Interval -->
-            <div id="sync-hours-wrap" style="display: none; flex-direction: column; gap: 10px;">
+            <div id="sync-hours-wrap" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
               <div class="option-row">
                 <label class="option-label" for="sync-hours">⏳ Interval (Hours)</label>
                 <input type="number" id="sync-hours" class="input" value="4" min="1" max="24" />
@@ -169,8 +190,11 @@
                 </div>
               </div>
             </div>
+          </div>
 
-            <button id="btn-save-sync" class="btn btn-primary btn-full" style="padding: 10px; margin-top: 5px;" disabled>
+          <div style="display: flex; gap: 10px; margin-top: 5px;">
+            <button id="btn-cancel-sync" class="btn btn-secondary btn-full" style="padding: 10px;">Cancel</button>
+            <button id="btn-save-sync" class="btn btn-primary btn-full" style="padding: 10px;" disabled>
               <span>💾</span> Save Settings
             </button>
           </div>
@@ -213,9 +237,16 @@
     </div>
 
     <!-- Footer -->
-    <footer class="footer">
+    <footer class="footer" style="display:flex; justify-content:space-between; align-items:center;">
       <span id="api-status">🟢 Connected</span>
+      <button id="btn-logs" class="btn-link" style="font-size: 12px; margin: 0;">Logs Event</button>
     </footer>
+    
+    <!-- Logs Section -->
+    <div id="logs-section" style="display:none; background:var(--surface2); padding:10px; border-top:1px solid var(--border); max-height:200px; overflow-y:auto; border-bottom-left-radius:8px; border-bottom-right-radius:8px;">
+       <ul id="logs-list" style="list-style:none; margin:0; padding:0; font-size:11px; color:var(--text); font-family:monospace; line-height: 1.4;">
+       </ul>
+    </div>
   </div>
 
   <script src="popup.js"></script>
