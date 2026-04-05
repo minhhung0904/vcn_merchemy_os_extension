@@ -4,6 +4,23 @@ const DEFAULT_API_URL = "http://localhost:3000/api/v2";
 
 const $ = (id) => document.getElementById(id);
 
+// ─── Refresh Token Helper ─────────────────────────────────────────────────────
+
+async function refreshFullToken() {
+  const { apiUrl, refreshToken } = await new Promise(res => chrome.storage.local.get(["apiUrl", "refreshToken"], res));
+  if (!refreshToken) throw new Error("No refresh token");
+  const url = (apiUrl || "http://localhost:3000/api/v2") + "/auth/refresh";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken })
+  });
+  if (!res.ok) throw new Error("Refresh failed");
+  const data = await res.json();
+  await new Promise(res => chrome.storage.local.set({ authToken: data.token, refreshToken: data.refreshToken }, res));
+  return data.token;
+}
+
 // ─── Load ────────────────────────────────────────────────────────────────────
 
 chrome.storage.local.get(
@@ -45,7 +62,7 @@ $("btn-save").addEventListener("click", () => {
 // ─── Sign Out ────────────────────────────────────────────────────────────────
 
 $("btn-signout").addEventListener("click", () => {
-  chrome.storage.local.set({ authToken: "", userEmail: "" }, () => {
+  chrome.storage.local.set({ authToken: "", refreshToken: "", userEmail: "" }, () => {
     $("user-row-loggedin").style.display = "none";
     $("user-row-loggedout").style.display = "flex";
     $("s-user-email").textContent = "—";
@@ -70,9 +87,20 @@ $("btn-test").addEventListener("click", async () => {
   setStatus("loading", "● Testing…");
 
   try {
-    const res = await fetch(`${apiUrl}/stores`, {
+    let res = await fetch(`${apiUrl}/stores`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
+
+    if (res.status === 401) {
+      try {
+        const newToken = await refreshFullToken();
+        res = await fetch(`${apiUrl}/stores`, {
+          headers: { Authorization: `Bearer ${newToken}` },
+        });
+      } catch (err) {
+        // Refresh failed, let it fall through to !res.ok
+      }
+    }
     if (res.ok) {
       const data = await res.json().catch(() => []);
       setStatus(

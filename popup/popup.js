@@ -15,6 +15,37 @@ const DEFAULT_ORDER_STATES = [
   { id: '', label: 'Completed' }
 ];
 
+// ─── Refresh Token Helpers ──────────────────────────────────────────────────────
+
+async function refreshFullToken() {
+  const { apiUrl, refreshToken } = await storage.get(["apiUrl", "refreshToken"]);
+  if (!refreshToken) throw new Error("No refresh token");
+  const res = await fetch((apiUrl || "http://localhost:3000/api/v2") + "/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken })
+  });
+  if (!res.ok) throw new Error("Refresh failed");
+  const data = await res.json();
+  await storage.set({ authToken: data.token, refreshToken: data.refreshToken });
+  return data.token;
+}
+
+async function refreshTempToken() {
+  const { apiUrl, tempRefreshToken } = await storage.get(["apiUrl", "tempRefreshToken"]);
+  if (!tempRefreshToken) throw new Error("No temp refresh token");
+  const res = await fetch((apiUrl || "http://localhost:3000/api/v2") + "/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken: tempRefreshToken })
+  });
+  if (!res.ok) throw new Error("Refresh failed");
+  const data = await res.json();
+  tempAuthToken = data.tempToken;
+  await storage.set({ tempAuthToken: data.tempToken, tempRefreshToken: data.tempRefreshToken });
+  return data.tempToken;
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -131,6 +162,7 @@ function bindLoginEvents() {
         // Persist for switching later
         await storage.set({ 
           tempAuthToken: data.tempToken, 
+          tempRefreshToken: data.tempRefreshToken,
           organizations: data.organizations 
         });
 
@@ -160,12 +192,12 @@ function bindLoginEvents() {
         );
         const orgData = await orgRes.json().catch(() => ({}));
         if (orgRes.ok && orgData.token) {
-          await saveAuth(orgData.token, orgData.user?.email || data.user?.email || email, data.organizations[0].name);
+          await saveAuth(orgData.token, orgData.refreshToken, orgData.user?.email || data.user?.email || email, data.organizations[0].name);
         } else {
           throw new Error(orgData.error || "Organization selection failed.");
         }
       } else if (data.token) {
-        await saveAuth(data.token, data.user?.email || email, "Personal");
+        await saveAuth(data.token, data.refreshToken, data.user?.email || email, "Personal");
       } else {
         throw new Error("No token received from server.");
       }
@@ -221,10 +253,32 @@ function bindOrgEvents() {
         },
       );
       
-      const orgData = await orgRes.json().catch(() => ({}));
+      let orgData = await orgRes.json().catch(() => ({}));
+      
+      if (orgRes.status === 401) {
+        try {
+          const newToken = await refreshTempToken();
+          const retryRes = await fetch(
+            (apiUrl || "http://localhost:3000/api/v2") + "/auth/select-organization",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${newToken}`,
+              },
+              body: JSON.stringify({ organizationId: parseInt(orgId, 10) }),
+            },
+          );
+          orgData = await retryRes.json().catch(() => ({}));
+          orgRes = retryRes;
+        } catch (refreshErr) {
+          throw new Error("Session expired. Please re-login.");
+        }
+      }
+
       if (orgRes.ok && orgData.token) {
         const orgName = selectEl.options[selectEl.selectedIndex].text;
-        await saveAuth(orgData.token, orgData.user?.email || tempAuthEmail, orgName);
+        await saveAuth(orgData.token, orgData.refreshToken, orgData.user?.email || tempAuthEmail, orgName);
         currentUser = tempAuthEmail;
         tempAuthToken = null;
         tempAuthEmail = null;
@@ -258,9 +312,10 @@ function setLoginLoading(on) {
   lbl.textContent = on ? "Signing in…" : "Sign In";
 }
 
-async function saveAuth(token, email, orgName) {
+async function saveAuth(token, refreshToken, email, orgName) {
   await storage.set({ 
-    authToken: token, 
+    authToken: token,
+    refreshToken: refreshToken,
     userEmail: email,
     activeOrgName: orgName 
   });
@@ -278,11 +333,13 @@ async function addSystemLog(type, message) {
 
 document.getElementById("btn-logout").addEventListener("click", async () => {
   await storage.set({ 
-    authToken: "", 
+    authToken: "",
+    refreshToken: "",
     userEmail: "", 
     activeOrgName: "",
     organizations: [],
-    tempAuthToken: ""
+    tempAuthToken: "",
+    tempRefreshToken: ""
   });
   currentUser = null;
   scrapedOrders = [];
@@ -369,13 +426,29 @@ async function isStoreRegistered(storeName) {
   try {
     const { apiUrl, authToken } = await storage.get(["apiUrl", "authToken"]);
     const url = (apiUrl || "http://localhost:3000/api/v2") + "/stores";
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${authToken}`
       }
     });
+
+    if (res.status === 401) {
+      try {
+        const newToken = await refreshFullToken();
+        res = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${newToken}`
+          }
+        });
+      } catch (err) {
+        // Refresh failed, allow network logic to handle it
+      }
+    }
+
     if (!res.ok) return true; // If API fails, allow to avoid blocking
     const stores = await res.json();
     return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");

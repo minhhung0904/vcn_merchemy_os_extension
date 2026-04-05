@@ -43,10 +43,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// ─── Refresh Token Helper ─────────────────────────────────────────────────────
+
+async function refreshFullToken() {
+  const { apiUrl, refreshToken } = await new Promise(res => chrome.storage.local.get(["apiUrl", "refreshToken"], res));
+  if (!refreshToken) throw new Error("No refresh token");
+  const url = (apiUrl || "http://localhost:3000/api/v2") + "/auth/refresh";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken })
+  });
+  if (!res.ok) throw new Error("Refresh failed");
+  const data = await res.json();
+  await new Promise(res => chrome.storage.local.set({ authToken: data.token, refreshToken: data.refreshToken }, res));
+  return data.token;
+}
+
 // ─── Push orders to Merchemy OS ───────────────────────────────────────────────
 
 async function handlePushOrders(orders) {
-  const { apiUrl, authToken, defaultStore } = await getSettings();
+  let { apiUrl, authToken, defaultStore } = await getSettings();
 
   if (!authToken)
     throw new Error("Not logged in. Please sign in via the extension popup.");
@@ -67,7 +84,7 @@ async function handlePushOrders(orders) {
   for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
     if (cancelPushFlag) break;
     const chunk = orders.slice(i, i + CHUNK_SIZE);
-    const res = await fetch(`${apiUrl}/orders/bulk`, {
+    let res = await fetch(`${apiUrl}/orders/bulk`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -77,9 +94,21 @@ async function handlePushOrders(orders) {
     });
 
     if (res.status === 401) {
-      // Token expired — clear it so next popup open shows login
-      chrome.storage.local.set({ authToken: "" });
-      throw new Error("Session expired. Please sign in again.");
+      try {
+        authToken = await refreshFullToken();
+        res = await fetch(`${apiUrl}/orders/bulk`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({ orders: chunk }),
+        });
+      } catch (err) {
+        // Token expired — clear it so next popup open shows login
+        chrome.storage.local.set({ authToken: "", refreshToken: "" });
+        throw new Error("Session expired. Please sign in again.");
+      }
     }
 
     if (!res.ok) {
@@ -121,13 +150,28 @@ async function checkStoreRegistered(storeName, apiUrl, authToken) {
   if (!storeName) return true;
   try {
     const url = (apiUrl || "http://localhost:3000/api/v2") + "/stores";
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${authToken}`
       }
     });
+
+    if (res.status === 401) {
+      try {
+        authToken = await refreshFullToken();
+        res = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${authToken}`
+          }
+        });
+      } catch (err) {
+        // Allow fallback behaviour to skip validation if auth fails
+      }
+    }
     if (!res.ok) return true; // Ignore validation if API is unreachable
     const stores = await res.json();
     return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");
