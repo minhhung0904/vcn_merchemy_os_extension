@@ -241,7 +241,7 @@ function bindOrgEvents() {
 
     try {
       const { apiUrl } = await storage.get(["apiUrl"]);
-      const orgRes = await fetch(
+      let orgRes = await fetch(
         (apiUrl || "http://localhost:3000/api/v2") + "/auth/select-organization",
         {
           method: "POST",
