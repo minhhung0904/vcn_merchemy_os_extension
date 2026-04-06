@@ -4,7 +4,7 @@
 
 
 
-const DEFAULT_API_URL = "http://localhost:3000/api/v2";
+const DEFAULT_API_URL = "https://api.vconnect.global/api/v2";
 
 let cancelPushFlag = false;
 
@@ -48,7 +48,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function refreshFullToken() {
   const { apiUrl, refreshToken } = await new Promise(res => chrome.storage.local.get(["apiUrl", "refreshToken"], res));
   if (!refreshToken) throw new Error("No refresh token");
-  const url = (apiUrl || "http://localhost:3000/api/v2") + "/auth/refresh";
+  const url = (apiUrl || "https://api.vconnect.global/api/v2") + "/auth/refresh";
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -149,7 +149,7 @@ async function addSystemLog(type, message) {
 async function checkStoreRegistered(storeName, apiUrl, authToken) {
   if (!storeName) return true;
   try {
-    const url = (apiUrl || "http://localhost:3000/api/v2") + "/stores";
+    const url = (apiUrl || "https://api.vconnect.global/api/v2") + "/stores";
     let res = await fetch(url, {
       method: "GET",
       headers: {
