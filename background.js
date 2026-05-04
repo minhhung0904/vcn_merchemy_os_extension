@@ -1,10 +1,10 @@
 // background.js — Service Worker
-// Handles API communication with Merchemy OS backend
+// Handles API communication with Sellfern backend
 
 
 
 
-const DEFAULT_API_URL = "https://api.vconnect.global/api/v2";
+const DEFAULT_API_URL = "https://api.sellfern.com/api/v2";
 
 let cancelPushFlag = false;
 
@@ -48,7 +48,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function refreshFullToken() {
   const { apiUrl, refreshToken } = await new Promise(res => chrome.storage.local.get(["apiUrl", "refreshToken"], res));
   if (!refreshToken) throw new Error("No refresh token");
-  const url = (apiUrl || "https://api.vconnect.global/api/v2") + "/auth/refresh";
+  const url = (apiUrl || "https://api.sellfern.com/api/v2") + "/auth/refresh";
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -60,7 +60,7 @@ async function refreshFullToken() {
   return data.token;
 }
 
-// ─── Push orders to Merchemy OS ───────────────────────────────────────────────
+// ─── Push orders to Sellfern ─────────────────────────────────────────────────
 
 async function handlePushOrders(orders) {
   let { apiUrl, authToken, defaultStore } = await getSettings();
@@ -73,7 +73,7 @@ async function handlePushOrders(orders) {
   if (storeName) {
     const isRegistered = await checkStoreRegistered(storeName, apiUrl, authToken);
     if (!isRegistered) {
-      throw new Error(`Store "${storeName}" does not exist in the system. Please add this Store to Merchemy OS first.`);
+      throw new Error(`Store "${storeName}" does not exist in the system. Please add this Store to Sellfern first.`);
     }
   }
 
@@ -149,7 +149,7 @@ async function addSystemLog(type, message) {
 async function checkStoreRegistered(storeName, apiUrl, authToken) {
   if (!storeName) return true;
   try {
-    const url = (apiUrl || "https://api.vconnect.global/api/v2") + "/stores";
+    const url = (apiUrl || "https://sellfern.com/api/v2") + "/stores";
     let res = await fetch(url, {
       method: "GET",
       headers: {
@@ -421,7 +421,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       
       if (orders.length > 0) {
         const result = await handlePushOrders(orders);
-        console.log(`[Auto-Sync] Successfully pushed ${result.pushed} orders to Merchemy OS.`);
+        console.log(`[Auto-Sync] Successfully pushed ${result.pushed} orders to Sellfern.`);
         await addSystemLog("success", `[Auto-Sync] Successfully fetched and pushed ${result.pushed} orders (New state).`);
       } else {
         console.log(`[Auto-Sync] No new orders found.`);

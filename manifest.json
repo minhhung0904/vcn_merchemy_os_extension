@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Merchemy OS - Etsy",
+  "name": "Sellfern - Etsy",
   "version": "1.1.0",
-  "description": "Merchemy OS extension",
+  "description": "Sellfern extension",
 
   "permissions": [
     "storage",
@@ -15,7 +15,7 @@
   "host_permissions": [
     "https://www.etsy.com/*",
     "https://*.etsy.com/*",
-    "https://api.vconnect.global/*"
+    "https://sellfern.com/*"
   ],
 
   "background": {

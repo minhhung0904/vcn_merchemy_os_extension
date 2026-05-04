@@ -20,7 +20,7 @@ const DEFAULT_ORDER_STATES = [
 async function refreshFullToken() {
   const { apiUrl, refreshToken } = await storage.get(["apiUrl", "refreshToken"]);
   if (!refreshToken) throw new Error("No refresh token");
-  const res = await fetch((apiUrl || "https://api.vconnect.global/api/v2") + "/auth/refresh", {
+  const res = await fetch((apiUrl || "https://sellfern.com/api/v2") + "/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken })
@@ -34,7 +34,7 @@ async function refreshFullToken() {
 async function refreshTempToken() {
   const { apiUrl, tempRefreshToken } = await storage.get(["apiUrl", "tempRefreshToken"]);
   if (!tempRefreshToken) throw new Error("No temp refresh token");
-  const res = await fetch((apiUrl || "https://api.vconnect.global/api/v2") + "/auth/refresh", {
+  const res = await fetch((apiUrl || "https://sellfern.com/api/v2") + "/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken: tempRefreshToken })
@@ -138,7 +138,7 @@ function bindLoginEvents() {
     try {
       const { apiUrl } = await storage.get(["apiUrl"]);
 
-      const url = (apiUrl || "https://api.vconnect.global/api/v2") + "/auth/login";
+      const url = (apiUrl || "https://sellfern.com/api/v2") + "/auth/login";
 
       const res = await fetch(url, {
         method: "POST",
@@ -179,7 +179,7 @@ function bindLoginEvents() {
       } else if (data.tempToken && data.organizations?.length === 1) {
         // Auto-select first org
         const orgRes = await fetch(
-          (apiUrl || "https://api.vconnect.global/api/v2") +
+          (apiUrl || "https://sellfern.com/api/v2") +
             "/auth/select-organization",
           {
             method: "POST",
@@ -242,7 +242,7 @@ function bindOrgEvents() {
     try {
       const { apiUrl } = await storage.get(["apiUrl"]);
       let orgRes = await fetch(
-        (apiUrl || "https://api.vconnect.global/api/v2") + "/auth/select-organization",
+        (apiUrl || "https://sellfern.com/api/v2") + "/auth/select-organization",
         {
           method: "POST",
           headers: {
@@ -259,7 +259,7 @@ function bindOrgEvents() {
         try {
           const newToken = await refreshTempToken();
           const retryRes = await fetch(
-            (apiUrl || "https://api.vconnect.global/api/v2") + "/auth/select-organization",
+        (apiUrl || "https://sellfern.com/api/v2") + "/auth/select-organization",
             {
               method: "POST",
               headers: {
@@ -407,7 +407,7 @@ function updateStoreWarningUI(storeName, registered) {
 
   if (warningIcon) {
     warningIcon.style.display = registered ? "none" : "inline";
-    if (!registered) warningIcon.title = `WARNING: Store "${storeName}" is NOT found in Merchemy OS. Please add it first!`;
+    if (!registered) warningIcon.title = `WARNING: Store "${storeName}" is NOT found in Sellfern. Please add it first!`;
   }
   if (btnRecheck) {
     btnRecheck.style.display = registered ? "none" : "inline";
@@ -425,7 +425,7 @@ async function isStoreRegistered(storeName) {
   if (!storeName) return false;
   try {
     const { apiUrl, authToken } = await storage.get(["apiUrl", "authToken"]);
-    const url = (apiUrl || "https://api.vconnect.global/api/v2") + "/stores";
+    const url = (apiUrl || "https://sellfern.com/api/v2") + "/stores";
     let res = await fetch(url, {
       method: "GET",
       headers: {
@@ -1043,7 +1043,7 @@ async function onScrape() {
     if (storeName) {
       const registered = await isStoreRegistered(storeName);
       if (!registered) {
-        const errMsg = `Store "${storeName}" is not added in Merchemy OS. Please add it first.`;
+        const errMsg = `Store "${storeName}" is not added in Sellfern. Please add it first.`;
         setStatus("error", "❌", errMsg, true);
         addSystemLog("error", `[Manual Scrape] ` + errMsg);
         return;
@@ -1110,7 +1110,7 @@ async function onPush() {
   setStatus(
     "loading",
     "🚀",
-    `Pushing ${scrapedOrders.length} orders to Merchemy OS…`,
+    `Pushing ${scrapedOrders.length} orders to Sellfern…`,
   );
 
   chrome.runtime.sendMessage(
@@ -1129,7 +1129,7 @@ async function onPush() {
         } else {
           scrapedOrders = [];
           clearPreview();
-          setStatus("success", "🎉", `Pushed ${pushedCount} orders to Merchemy OS!`, true);
+          setStatus("success", "🎉", `Pushed ${pushedCount} orders to Sellfern!`, true);
           addSystemLog("success", `[Push] Successfully pushed ${pushedCount} orders.`);
           getEl("btn-push").disabled = true;
         }

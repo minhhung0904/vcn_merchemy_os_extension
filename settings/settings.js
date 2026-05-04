@@ -1,6 +1,6 @@
 // settings/settings.js
 
-const DEFAULT_API_URL = "https://api.vconnect.global/api/v2";
+const DEFAULT_API_URL = "https://sellfern.com/api/v2";
 
 const $ = (id) => document.getElementById(id);
 
@@ -9,7 +9,7 @@ const $ = (id) => document.getElementById(id);
 async function refreshFullToken() {
   const { apiUrl, refreshToken } = await new Promise(res => chrome.storage.local.get(["apiUrl", "refreshToken"], res));
   if (!refreshToken) throw new Error("No refresh token");
-  const url = (apiUrl || "https://api.vconnect.global/api/v2") + "/auth/refresh";
+  const url = (apiUrl || "https://sellfern.com/api/v2") + "/auth/refresh";
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

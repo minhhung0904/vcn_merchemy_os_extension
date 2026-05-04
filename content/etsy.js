@@ -1,14 +1,14 @@
 // content/etsy.js
 // Fetches orders via Etsy's internal Mission Control API and maps them to the
-// Merchemy OS Order / OrderItem structure.
+// Sellfern Order / OrderItem structure.
 // Since this script runs in the etsy.com context, all fetch calls are
 // same-origin and carry the user's session cookies automatically.
 
 (function () {
   'use strict';
 
-  if (window.__merchemyEtsyScraperLoaded) return;
-  window.__merchemyEtsyScraperLoaded = true;
+  if (window.__sellfernEtsyScraperLoaded) return;
+  window.__sellfernEtsyScraperLoaded = true;
 
   // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -390,7 +390,7 @@
           Object.assign(allShipments, data);
         }
       } catch (e) {
-        console.error('[Merchemy Scraper] Failed to fetch shipments batch', e);
+        console.error('[Sellfern Scraper] Failed to fetch shipments batch', e);
       }
     }
     
@@ -452,7 +452,7 @@
     return map;
   }
 
-  // ─── Map Etsy Order → Merchemy OS Order ──────────────────────────────────────
+  // ─── Map Etsy Order → Sellfern Order ────────────────────────────────────────
 
   function mapOrder(etsyOrder, buyerMap, storeName, orderCtx = {}) {
     const buyer_id = getV(etsyOrder, 'buyer_id', 'buyerId');
@@ -563,7 +563,7 @@
     };
   }
 
-  // ─── Map Transaction → Merchemy OS OrderItem ──────────────────────────────────
+  // ─── Map Transaction → Sellfern OrderItem ────────────────────────────────────
 
   function mapTransaction(tx, orderCtx, shipmentInfo = null) {
     const product    = getV(tx, 'product', 'product') || {};
@@ -597,7 +597,7 @@
       variations:      variationStr,
       personalization: orderCtx.buyerNote,
 
-      // Shipping / Order context (flattened onto each item — Merchemy OS style)
+      // Shipping / Order context (flattened onto each item — Sellfern style)
       orderId:         orderCtx.orderId,
       orderDate:       orderCtx.orderDate,
       storeName:       orderCtx.storeName,
@@ -691,14 +691,14 @@
 
       while (hasMore) {
         if (cancelScrapeFlag) {
-          console.log('[Merchemy Scraper] Scrape cancelled.');
+          console.log('[Sellfern Scraper] Scrape cancelled.');
           break;
         }
         // Random delay (1.5s - 3.5s) to mimic human behavior
         await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 2000) + 1500));
 
         if (cancelScrapeFlag) {
-          console.log('[Merchemy Scraper] Scrape cancelled.');
+          console.log('[Sellfern Scraper] Scrape cancelled.');
           break;
         }
 
@@ -751,5 +751,5 @@
     }
   }
 
-  console.log('[Merchemy Scraper] Etsy Mission Control API connector loaded.');
+  console.log('[Sellfern Scraper] Etsy Mission Control API connector loaded.');
 })();
