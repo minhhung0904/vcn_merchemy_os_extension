@@ -6,10 +6,10 @@
   --surface: #1a1d2e;
   --surface2:#232638;
   --border:  #2e3150;
-  --accent:  #6c63ff;
-  --accent2: #a78bfa;
-  --green:   #22d3a5;
-  --red:     #f87171;
+  --accent:  #14b8a6;
+  --accent2: #0d9488;
+  --green:   #10b981;
+  --red:     #ef4444;
   --text:    #e2e8f0;
   --muted:   #8892b0;
   --radius:  12px;
@@ -33,7 +33,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
   flex-direction: column;
   gap: 14px;
 }
-.info-card { background: var(--surface2); }
 .card-title { font-size: 13px; font-weight: 700; color: var(--accent2); text-transform: uppercase; letter-spacing: 0.06em; }
 
 /* Fields */
@@ -41,7 +40,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .field label { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
 .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
 .hint code { background: var(--surface2); padding: 1px 4px; border-radius: 3px; font-family: monospace; color: var(--accent2); }
-.badge { font-size: 10px; background: var(--red); color: #fff; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
 
 /* Input */
 .input {
@@ -58,18 +56,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 }
 .input:focus { border-color: var(--accent); }
 
-.input-row { display: flex; gap: 6px; }
-.input-row .input { flex: 1; }
-.btn-eye { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; cursor: pointer; font-size: 16px; transition: border-color 0.2s; }
-.btn-eye:hover { border-color: var(--accent); }
-
-/* Connection Status */
-.conn-status { font-size: 12px; padding: 6px 10px; border-radius: 6px; background: var(--surface2); }
-.conn-status.idle   { color: var(--muted); }
-.conn-status.ok     { color: var(--green); }
-.conn-status.error  { color: var(--red); }
-.conn-status.loading{ color: var(--accent2); }
-
 /* Actions */
 .actions { display: flex; align-items: center; gap: 12px; }
 .save-status { font-size: 12px; color: var(--green); }
@@ -85,7 +71,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
   font-family: inherit;
   transition: all 0.2s;
 }
-.btn-primary { background: linear-gradient(135deg, var(--accent), #8b5cf6); color: #fff; }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
 .btn-primary:hover { filter: brightness(1.15); }
 .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .btn-outline:hover { border-color: var(--accent); color: var(--accent2); }
@@ -97,10 +83,3 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .user-email  { font-size: 13px; font-weight: 600; color: var(--text); }
 .user-status { font-size: 11px; color: var(--green); margin-top: 2px; }
 .btn-sm      { padding: 6px 12px; font-size: 12px; flex: 0; }
-
-/* Steps */
-.steps { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
-.steps li { font-size: 13px; color: var(--muted); line-height: 1.6; }
-.steps strong { color: var(--text); }
-kbd { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-size: 11px; }
-.note { font-size: 12px; color: var(--muted); font-style: italic; }

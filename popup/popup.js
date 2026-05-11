@@ -18,29 +18,31 @@ const DEFAULT_ORDER_STATES = [
 // ─── Refresh Token Helpers ──────────────────────────────────────────────────────
 
 async function refreshFullToken() {
-  const { apiUrl, refreshToken } = await storage.get(["apiUrl", "refreshToken"]);
+  const { refreshToken } = await storage.get(["refreshToken"]);
   if (!refreshToken) throw new Error("No refresh token");
-  const res = await fetch((apiUrl || "https://sellfern.com/api/v2") + "/auth/refresh", {
+  const res = await fetch(DEFAULT_API_URL + "/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken })
   });
-  if (!res.ok) throw new Error("Refresh failed");
-  const data = await res.json();
+  const response = await res.json();
+  if (!res.ok || !response.success) throw new Error(response.error?.message || "Refresh failed");
+  const data = response.data;
   await storage.set({ authToken: data.token, refreshToken: data.refreshToken });
   return data.token;
 }
 
 async function refreshTempToken() {
-  const { apiUrl, tempRefreshToken } = await storage.get(["apiUrl", "tempRefreshToken"]);
+  const { tempRefreshToken } = await storage.get(["tempRefreshToken"]);
   if (!tempRefreshToken) throw new Error("No temp refresh token");
-  const res = await fetch((apiUrl || "https://sellfern.com/api/v2") + "/auth/refresh", {
+  const res = await fetch(DEFAULT_API_URL + "/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken: tempRefreshToken })
   });
-  if (!res.ok) throw new Error("Refresh failed");
-  const data = await res.json();
+  const response = await res.json();
+  if (!res.ok || !response.success) throw new Error(response.error?.message || "Refresh failed");
+  const data = response.data;
   tempAuthToken = data.tempToken;
   await storage.set({ tempAuthToken: data.tempToken, tempRefreshToken: data.tempRefreshToken });
   return data.tempToken;
@@ -136,9 +138,7 @@ function bindLoginEvents() {
     setLoginLoading(true);
 
     try {
-      const { apiUrl } = await storage.get(["apiUrl"]);
-
-      const url = (apiUrl || "https://sellfern.com/api/v2") + "/auth/login";
+      const url = DEFAULT_API_URL + "/auth/login";
 
       const res = await fetch(url, {
         method: "POST",
@@ -146,13 +146,16 @@ function bindLoginEvents() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json().catch(() => ({}));
+      const response = await res.json().catch(() => ({}));
 
-      if (!res.ok) {
+      // Handle new response format
+      if (!res.ok || !response.success) {
         throw new Error(
-          data.error || data.message || `Login failed (${res.status})`,
+          response.error?.message || response.error || `Login failed (${res.status})`,
         );
       }
+
+      const data = response.data;
 
       // Might require org selection for multi-org accounts
       if (data.tempToken && data.organizations?.length > 1) {
@@ -179,8 +182,7 @@ function bindLoginEvents() {
       } else if (data.tempToken && data.organizations?.length === 1) {
         // Auto-select first org
         const orgRes = await fetch(
-          (apiUrl || "https://sellfern.com/api/v2") +
-            "/auth/select-organization",
+          DEFAULT_API_URL + "/auth/select-organization",
           {
             method: "POST",
             headers: {
@@ -190,11 +192,12 @@ function bindLoginEvents() {
             body: JSON.stringify({ organizationId: data.organizations[0].id }),
           },
         );
-        const orgData = await orgRes.json().catch(() => ({}));
-        if (orgRes.ok && orgData.token) {
+        const orgResponse = await orgRes.json().catch(() => ({}));
+        if (orgRes.ok && orgResponse.success && orgResponse.data?.token) {
+          const orgData = orgResponse.data;
           await saveAuth(orgData.token, orgData.refreshToken, orgData.user?.email || data.user?.email || email, data.organizations[0].name);
         } else {
-          throw new Error(orgData.error || "Organization selection failed.");
+          throw new Error(orgResponse.error?.message || orgResponse.error || "Organization selection failed.");
         }
       } else if (data.token) {
         await saveAuth(data.token, data.refreshToken, data.user?.email || email, "Personal");
@@ -240,9 +243,8 @@ function bindOrgEvents() {
     document.getElementById("btn-org-label").textContent = "Continuing...";
 
     try {
-      const { apiUrl } = await storage.get(["apiUrl"]);
       let orgRes = await fetch(
-        (apiUrl || "https://sellfern.com/api/v2") + "/auth/select-organization",
+        DEFAULT_API_URL + "/auth/select-organization",
         {
           method: "POST",
           headers: {
@@ -253,13 +255,13 @@ function bindOrgEvents() {
         },
       );
       
-      let orgData = await orgRes.json().catch(() => ({}));
+      let orgResponse = await orgRes.json().catch(() => ({}));
       
       if (orgRes.status === 401) {
         try {
           const newToken = await refreshTempToken();
           const retryRes = await fetch(
-        (apiUrl || "https://sellfern.com/api/v2") + "/auth/select-organization",
+        DEFAULT_API_URL + "/auth/select-organization",
             {
               method: "POST",
               headers: {
@@ -269,14 +271,15 @@ function bindOrgEvents() {
               body: JSON.stringify({ organizationId: parseInt(orgId, 10) }),
             },
           );
-          orgData = await retryRes.json().catch(() => ({}));
+          orgResponse = await retryRes.json().catch(() => ({}));
           orgRes = retryRes;
         } catch (refreshErr) {
           throw new Error("Session expired. Please re-login.");
         }
       }
 
-      if (orgRes.ok && orgData.token) {
+      if (orgRes.ok && orgResponse.success && orgResponse.data?.token) {
+        const orgData = orgResponse.data;
         const orgName = selectEl.options[selectEl.selectedIndex].text;
         await saveAuth(orgData.token, orgData.refreshToken, orgData.user?.email || tempAuthEmail, orgName);
         currentUser = tempAuthEmail;
@@ -287,7 +290,7 @@ function bindOrgEvents() {
         loadMainPrefs();
         forceDetectShopInfo(true);
       } else {
-        throw new Error(orgData.error || "Organization selection failed.");
+        throw new Error(orgResponse.error?.message || orgResponse.error || "Organization selection failed.");
       }
     } catch (err) {
       errEl.textContent = err.message;
@@ -424,8 +427,8 @@ function updateStoreWarningUI(storeName, registered) {
 async function isStoreRegistered(storeName) {
   if (!storeName) return false;
   try {
-    const { apiUrl, authToken } = await storage.get(["apiUrl", "authToken"]);
-    const url = (apiUrl || "https://sellfern.com/api/v2") + "/stores";
+    const { authToken } = await storage.get(["authToken"]);
+    const url = DEFAULT_API_URL + "/stores";
     let res = await fetch(url, {
       method: "GET",
       headers: {
@@ -450,7 +453,8 @@ async function isStoreRegistered(storeName) {
     }
 
     if (!res.ok) return true; // If API fails, allow to avoid blocking
-    const stores = await res.json();
+    const response = await res.json();
+    const stores = response.success ? response.data : response;
     return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");
   } catch (e) {
     console.error("Failed to check store existence:", e);

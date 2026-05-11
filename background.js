@@ -1,10 +1,7 @@
 // background.js — Service Worker
 // Handles API communication with Sellfern backend
 
-
-
-
-const DEFAULT_API_URL = "https://api.sellfern.com/api/v2";
+import { DEFAULT_API_URL } from './config.js';
 
 let cancelPushFlag = false;
 
@@ -30,10 +27,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "GET_SETTINGS") {
     chrome.storage.local.get(
-      ["apiUrl", "authToken", "defaultStore"],
+      ["authToken", "defaultStore"],
       (data) => {
         sendResponse({
-          apiUrl: data.apiUrl || DEFAULT_API_URL,
+          apiUrl: DEFAULT_API_URL,
           authToken: data.authToken || "",
           defaultStore: data.defaultStore || "",
         });
@@ -46,16 +43,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ─── Refresh Token Helper ─────────────────────────────────────────────────────
 
 async function refreshFullToken() {
-  const { apiUrl, refreshToken } = await new Promise(res => chrome.storage.local.get(["apiUrl", "refreshToken"], res));
+  const { refreshToken } = await new Promise(res => chrome.storage.local.get(["refreshToken"], res));
   if (!refreshToken) throw new Error("No refresh token");
-  const url = (apiUrl || "https://api.sellfern.com/api/v2") + "/auth/refresh";
+  const url = DEFAULT_API_URL + "/auth/refresh";
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken })
   });
-  if (!res.ok) throw new Error("Refresh failed");
-  const data = await res.json();
+  const response = await res.json();
+  if (!res.ok || !response.success) throw new Error(response.error?.message || "Refresh failed");
+  const data = response.data;
   await new Promise(res => chrome.storage.local.set({ authToken: data.token, refreshToken: data.refreshToken }, res));
   return data.token;
 }
@@ -63,7 +61,7 @@ async function refreshFullToken() {
 // ─── Push orders to Sellfern ─────────────────────────────────────────────────
 
 async function handlePushOrders(orders) {
-  let { apiUrl, authToken, defaultStore } = await getSettings();
+  let { authToken, defaultStore } = await getSettings();
 
   if (!authToken)
     throw new Error("Not logged in. Please sign in via the extension popup.");
@@ -71,7 +69,7 @@ async function handlePushOrders(orders) {
 
   const storeName = defaultStore || orders[0]?.storeName;
   if (storeName) {
-    const isRegistered = await checkStoreRegistered(storeName, apiUrl, authToken);
+    const isRegistered = await checkStoreRegistered(storeName, authToken);
     if (!isRegistered) {
       throw new Error(`Store "${storeName}" does not exist in the system. Please add this Store to Sellfern first.`);
     }
@@ -84,7 +82,7 @@ async function handlePushOrders(orders) {
   for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
     if (cancelPushFlag) break;
     const chunk = orders.slice(i, i + CHUNK_SIZE);
-    let res = await fetch(`${apiUrl}/orders/bulk`, {
+    let res = await fetch(`${DEFAULT_API_URL}/orders/bulk`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -96,7 +94,7 @@ async function handlePushOrders(orders) {
     if (res.status === 401) {
       try {
         authToken = await refreshFullToken();
-        res = await fetch(`${apiUrl}/orders/bulk`, {
+        res = await fetch(`${DEFAULT_API_URL}/orders/bulk`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -112,8 +110,8 @@ async function handlePushOrders(orders) {
     }
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${res.status}: Upload failed.`);
+      const response = await res.json().catch(() => ({}));
+      throw new Error(response.error?.message || response.error || `HTTP ${res.status}: Upload failed.`);
     }
 
     pushed += chunk.length;
@@ -129,9 +127,8 @@ async function handlePushOrders(orders) {
 
 function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["apiUrl", "authToken"], (data) => {
+    chrome.storage.local.get(["authToken", "defaultStore"], (data) => {
       resolve({
-        apiUrl: data.apiUrl || DEFAULT_API_URL,
         authToken: data.authToken || "",
         defaultStore: data.defaultStore || "",
       });
@@ -146,10 +143,10 @@ async function addSystemLog(type, message) {
   await new Promise((res) => chrome.storage.local.set({ systemLogs }, res));
 }
 
-async function checkStoreRegistered(storeName, apiUrl, authToken) {
+async function checkStoreRegistered(storeName, authToken) {
   if (!storeName) return true;
   try {
-    const url = (apiUrl || "https://sellfern.com/api/v2") + "/stores";
+    const url = DEFAULT_API_URL + "/stores";
     let res = await fetch(url, {
       method: "GET",
       headers: {
@@ -173,7 +170,8 @@ async function checkStoreRegistered(storeName, apiUrl, authToken) {
       }
     }
     if (!res.ok) return true; // Ignore validation if API is unreachable
-    const stores = await res.json();
+    const response = await res.json();
+    const stores = response.success ? response.data : response;
     return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");
   } catch (e) {
     return true; // Ignore if network disconnects
