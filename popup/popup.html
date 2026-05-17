@@ -116,12 +116,12 @@
         </label>
         <button id="btn-detect-shop" class="btn-link" style="font-size: 12px; padding: 0;">Auto Detect</button>
       </div>
-      <div class="row-2col">
-        <input type="text" id="input-store" class="input" placeholder="Store Name" title="Store Name" />
-        <input type="text" id="input-shopid" class="input" placeholder="Shop ID" title="Shop ID" />
-      </div>
       <div id="store-warning-text" style="display: none; color: #ff6b6b; font-size: 11px; margin-top: 8px; padding: 6px; background: rgba(255, 107, 107, 0.1); border-radius: 4px; border: 1px solid rgba(255, 107, 107, 0.2);">
-        🚨 WARNING: Store "<span id="warning-store-name"></span>" is NOT found in Sellfern. Please add it first!
+        <span id="store-warning-message">🚨 WARNING: Store "<span id="warning-store-name"></span>" is NOT found in Sellfern. Please add it first!</span>
+      </div>
+      <div>
+        <input type="text" id="input-store" class="input" placeholder="Store Name" title="Store Name" readonly />
+        <input type="hidden" id="input-shopid" />
       </div>
     </section>
     

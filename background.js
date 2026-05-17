@@ -71,7 +71,7 @@ async function handlePushOrders(orders) {
   if (storeName) {
     const isRegistered = await checkStoreRegistered(storeName, authToken);
     if (!isRegistered) {
-      throw new Error(`Store "${storeName}" does not exist in the system. Please add this Store to Sellfern first.`);
+      throw new Error(`Store "${storeName}" is not in this organization. Please contact your admin to add this store before pushing to Sellfern.`);
     }
   }
 
@@ -193,7 +193,7 @@ async function setupSyncAlarm() {
   
   await chrome.alarms.clear("autoSync");
   
-  if (autoSyncEnabled === false) {
+  if (autoSyncEnabled !== true) {
     console.log("[Auto-Sync] Disabled by user.");
     return;
   }
@@ -243,7 +243,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     console.log("[Auto-Sync] Firing sync alarm...");
     const { shopId, defaultStore, autoSyncEnabled, orderStates, completedTimeframe } = await new Promise((res) => chrome.storage.local.get(["shopId", "defaultStore", "autoSyncEnabled", "orderStates", "completedTimeframe"], res));
     
-    if (autoSyncEnabled === false) {
+    if (autoSyncEnabled !== true) {
       console.log("[Auto-Sync] Aborted. Auto-sync is disabled by user.");
       return;
     }

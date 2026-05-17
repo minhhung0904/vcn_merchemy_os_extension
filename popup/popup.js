@@ -1,5 +1,7 @@
 // popup/popup.js — Login + Main scraper flow
 
+const DEFAULT_API_URL = window.DEFAULT_API_URL || "http://localhost:3000/api/v2";
+
 let scrapedOrders = [];
 let currentUser = null;
 let tempAuthToken = null;
@@ -353,10 +355,9 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
 // ─── Main prefs ───────────────────────────────────────────────────────────────
 
 async function loadMainPrefs() {
-  const { defaultStore, shopId, orderStateId, orderStates, completedTimeframe } = await storage.get([
+  const { defaultStore, shopId, orderStates, completedTimeframe } = await storage.get([
     "defaultStore",
     "shopId",
-    "orderStateId",
     "orderStates",
     "completedTimeframe"
   ]);
@@ -365,6 +366,8 @@ async function loadMainPrefs() {
     isStoreRegistered(defaultStore).then(registered => {
       updateStoreWarningUI(defaultStore, registered);
     });
+  } else {
+    updateStoreWarningUI("", false);
   }
   if (shopId) getEl("input-shopid").value = shopId;
   if (completedTimeframe) {
@@ -374,7 +377,10 @@ async function loadMainPrefs() {
   
   // Use defaults if none saved, but filter to only show "New" and "Completed"
   const statesToRender = (orderStates && orderStates.length > 0) ? orderStates : DEFAULT_ORDER_STATES;
-  renderOrderStates(statesToRender, orderStateId);
+  const newState = statesToRender.find(s => s.label?.toLowerCase().includes("new"));
+  const selectedId = newState ? newState.id : statesToRender[0]?.id;
+  renderOrderStates(statesToRender, selectedId);
+  storage.set({ orderStateId: selectedId });
 }
 
 function renderOrderStates(states, selectedId) {
@@ -390,11 +396,15 @@ function renderOrderStates(states, selectedId) {
     allowedLabels.some(label => s.label.toLowerCase().includes(label))
   );
 
+  let selectedApplied = false;
   filteredStates.forEach(s => {
     const opt = document.createElement("option");
     opt.value = s.id;
     opt.textContent = s.label;
-    if (String(s.id) === String(selectedId)) opt.selected = true;
+    if (!selectedApplied && String(s.id) === String(selectedId)) {
+      opt.selected = true;
+      selectedApplied = true;
+    }
     select.appendChild(opt);
   });
   
@@ -406,20 +416,29 @@ function updateStoreWarningUI(storeName, registered) {
   const btnRecheck = document.getElementById("btn-recheck-store");
   const btnScrape = document.getElementById("btn-scrape");
   const warningTextNode = document.getElementById("store-warning-text");
+  const warningMessage = document.getElementById("store-warning-message");
   const warningStoreName = document.getElementById("warning-store-name");
+  const hasStore = Boolean(storeName);
 
   if (warningIcon) {
-    warningIcon.style.display = registered ? "none" : "inline";
-    if (!registered) warningIcon.title = `WARNING: Store "${storeName}" is NOT found in Sellfern. Please add it first!`;
+    warningIcon.style.display = (hasStore && registered) ? "none" : "inline";
+    warningIcon.title = hasStore
+      ? `WARNING: Store "${storeName}" is NOT found in Sellfern. Please add it first!`
+      : "Please open Etsy and click Auto Detect to get store information.";
   }
   if (btnRecheck) {
-    btnRecheck.style.display = registered ? "none" : "inline";
+    btnRecheck.style.display = (!hasStore || registered) ? "none" : "inline";
   }
   if (btnScrape) {
-    btnScrape.disabled = !registered;
+    btnScrape.disabled = !hasStore || !registered;
   }
   if (warningTextNode) {
-    warningTextNode.style.display = (storeName && !registered) ? "block" : "none";
+    warningTextNode.style.display = (!hasStore || !registered) ? "block" : "none";
+    if (warningMessage) {
+      warningMessage.textContent = hasStore
+        ? `🚨 WARNING: Store "${storeName}" is NOT found in Sellfern. Please add it first!`
+        : "🚨 Open Etsy and click Auto Detect before fetching orders.";
+    }
     if (warningStoreName) warningStoreName.textContent = storeName;
   }
 }
@@ -596,7 +615,7 @@ async function autoDetectShopIdActiveTab() {
         isRegistered = await isStoreRegistered(currentStore);
         updateStoreWarningUI(currentStore, isRegistered);
       } else {
-        updateStoreWarningUI("", true);
+        updateStoreWarningUI("", false);
       }
 
       if (!shopId && !storeName) {
@@ -708,7 +727,7 @@ function bindMainEvents() {
       
       setStatus("info", "🔍", "Navigate to any Etsy page, then click Fetch Orders.");
     } else {
-      updateStoreWarningUI("", true);
+      updateStoreWarningUI("", false);
     }
   });
 
@@ -798,7 +817,7 @@ function bindMainEvents() {
     if (btnCancelSync) {
       btnCancelSync.addEventListener("click", () => {
         if (!lastSavedSettings) { closeEditor(); return; }
-        toggleAutoSync.checked = lastSavedSettings.autoSyncEnabled !== false;
+        toggleAutoSync.checked = lastSavedSettings.autoSyncEnabled === true;
         modeSelect.value = lastSavedSettings.syncMode || "daily";
         hoursInput.value = lastSavedSettings.syncHours || "4";
         
@@ -814,7 +833,7 @@ function bindMainEvents() {
     }
 
     storage.get(["autoSyncEnabled", "syncMode", "syncTime", "syncHours", "syncStartTime"]).then((res) => {
-      toggleAutoSync.checked = res.autoSyncEnabled !== false;
+      toggleAutoSync.checked = res.autoSyncEnabled === true;
       modeSelect.value = res.syncMode || "daily";
       hoursInput.value = res.syncHours || "4";
 
@@ -1047,7 +1066,7 @@ async function onScrape() {
     if (storeName) {
       const registered = await isStoreRegistered(storeName);
       if (!registered) {
-        const errMsg = `Store "${storeName}" is not added in Sellfern. Please add it first.`;
+        const errMsg = `Store "${storeName}" is not in this organization. Please contact your admin to add this store before pushing to Sellfern.`;
         setStatus("error", "❌", errMsg, true);
         addSystemLog("error", `[Manual Scrape] ` + errMsg);
         return;
