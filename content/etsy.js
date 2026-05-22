@@ -69,7 +69,7 @@
     let completedDate = 'all';
 
     const isNew = orderStateLabel.toLowerCase().includes('new');
-    const isCompleted = orderStateLabel.toLowerCase().includes('completed');
+    const isCompleted = orderStateLabel.toLowerCase().includes('completed') || orderStateLabel.toLowerCase().includes('finish');
 
     if (isNew) {
       sortBy = 'expected_ship_date';
@@ -192,8 +192,8 @@
 
       // Type 2: Order state ID and URL pair (very robust)
       // For Completed: /your/orders/sold/completed
-      const completedMatch = text.match(/"order_state_id"\s*:\s*"(\d+)"[^}]*?"url"\s*:\s*"[^"]*\/your\/orders\/sold\/completed"/) ||
-                             text.match(/"url"\s*:\s*"[^"]*\/your\/orders\/sold\/completed"[^}]*?"order_state_id"\s*:\s*"(\d+)"/);
+      const completedMatch = text.match(/"order_state_id"\s*:\s*"(\d+)"[^}]*?"url"\s*:\s*"[^"]*(?:\\\/|\/)your(?:\\\/|\/)orders(?:\\\/|\/)sold(?:\\\/|\/)completed"/) ||
+                             text.match(/"url"\s*:\s*"[^"]*(?:\\\/|\/)your(?:\\\/|\/)orders(?:\\\/|\/)sold(?:\\\/|\/)completed"[^}]*?"order_state_id"\s*:\s*"(\d+)"/);
       if (completedMatch && !seenIds.has(completedMatch[1])) {
         states.push({ label: "Completed", id: completedMatch[1] });
         seenIds.add(completedMatch[1]);
@@ -201,8 +201,8 @@
 
       // For New: /your/orders/sold (without /completed)
       // Caution: the regex must not match /completed
-      const newMatch = text.match(/"order_state_id"\s*:\s*"(\d+)"[^}]*?"url"\s*:\s*"[^"]*\/your\/orders\/sold(?!\/completed)"/) ||
-                       text.match(/"url"\s*:\s*"[^"]*\/your\/orders\/sold(?!\/completed)"[^}]*?"order_state_id"\s*:\s*"(\d+)"/);
+      const newMatch = text.match(/"order_state_id"\s*:\s*"(\d+)"[^}]*?"url"\s*:\s*"[^"]*(?:\\\/|\/)your(?:\\\/|\/)orders(?:\\\/|\/)sold(?!(?:\\\/|\/)completed)"/) ||
+                       text.match(/"url"\s*:\s*"[^"]*(?:\\\/|\/)your(?:\\\/|\/)orders(?:\\\/|\/)sold(?!(?:\\\/|\/)completed)"[^}]*?"order_state_id"\s*:\s*"(\d+)"/);
       if (newMatch && !seenIds.has(newMatch[1])) {
         states.push({ label: "New", id: newMatch[1] });
         seenIds.add(newMatch[1]);
@@ -405,6 +405,26 @@
     return obj[snake] !== undefined ? obj[snake] : obj[camel];
   };
 
+  function getOrderId(etsyOrder) {
+    const directId = getV(etsyOrder, 'order_id', 'orderId') ||
+      getV(etsyOrder, 'receipt_id', 'receiptId') ||
+      getV(etsyOrder, 'receipt_number', 'receiptNumber') ||
+      etsyOrder?.id;
+    if (directId) return String(directId);
+
+    const url = getV(etsyOrder, 'order_url', 'orderUrl') || getV(etsyOrder, 'receipt_url', 'receiptUrl') || '';
+    const urlMatch = String(url).match(/(?:orders|receipts)\/(\d+)/);
+    if (urlMatch) return urlMatch[1];
+
+    const txs = getV(etsyOrder, 'transactions', 'transactions') || [];
+    for (const tx of txs) {
+      const txOrderId = getV(tx, 'order_id', 'orderId') || getV(tx, 'receipt_id', 'receiptId');
+      if (txOrderId) return String(txOrderId);
+    }
+
+    return '';
+  }
+
   async function fetchAllOrders(shopId, options = {}) {
     const ctx = getDynamicContext(options.orderStateId || DEFAULT_ORDER_STATE);
     const limit = options.limit || DEFAULT_LIMIT;
@@ -498,7 +518,7 @@
     const paymentMethod = getV(payment, 'payment_method', 'paymentMethod') || '';
 
     // Map transactions → items
-    const orderId = String(getV(etsyOrder, 'order_id', 'orderId'));
+    const orderId = getOrderId(etsyOrder);
     const shipment = (orderCtx.shipments && orderCtx.shipments[orderId])?.[0] || null;
 
     // Map transactions → items
@@ -729,7 +749,7 @@
       const isCompleted = message.orderStateLabel?.toLowerCase().includes('completed') || message.orderStateLabel?.toLowerCase().includes('finish');
 
       if (!cancelScrapeFlag && isCompleted && allRawOrders.length > 0) {
-        const orderIds = allRawOrders.map(o => String(getV(o, 'order_id', 'orderId')));
+        const orderIds = allRawOrders.map(getOrderId).filter(Boolean);
         shipments = await fetchShipments(shopId, orderIds, ctx, () => cancelScrapeFlag);
       }
 
