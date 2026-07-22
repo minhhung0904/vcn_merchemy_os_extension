@@ -7,33 +7,6 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <!-- ═══════════════════ SETUP VIEW (no API token configured) ═══════════════════ -->
-  <div class="container" id="view-setup">
-    <header class="header">
-      <div class="logo">
-        <img src="../icons/icon32.png" alt="Logo" class="logo-icon" />
-        <span class="logo-text">Sellfern</span>
-      </div>
-    </header>
-
-    <div class="login-hero">
-      <p class="login-sub">Chưa cấu hình API Token</p>
-    </div>
-
-    <div class="login-form">
-      <p style="font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 16px;">
-        Vào <strong>Settings</strong> để dán API Token của tổ chức (org) bạn,
-        lấy từ Merchemy OS → Settings → API Tokens.
-      </p>
-
-      <div class="login-error" id="setup-error" style="display:none;"></div>
-
-      <button class="btn btn-primary btn-full" id="btn-open-settings">
-        Open Settings
-      </button>
-    </div>
-  </div>
-
   <!-- ═══════════════════ MAIN VIEW ═══════════════════ -->
   <div class="container" id="view-main" style="display:none;">
     <!-- Header -->
@@ -47,11 +20,24 @@
           <input type="checkbox" id="btn-theme-toggle">
           <div class="slider"></div>
         </label>
-        <button class="btn-icon" id="btn-open-settings-main" title="Settings" style="color: var(--text);">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <button class="btn-settings" id="btn-open-settings-main" title="Configure API Token">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Settings</span>
         </button>
       </div>
     </header>
+
+    <!-- Config banner (shown when API Token not set) -->
+    <div class="setup-banner" id="setup-banner" style="display:none;" title="Open Settings to configure">
+      <div class="setup-banner-head">
+        <span class="setup-banner-icon">⚠️</span>
+        <div class="setup-banner-title">API Token not configured</div>
+      </div>
+      <p class="setup-banner-text">
+        This extension needs your organization's <strong>API Token</strong> to connect to Merchemy OS.
+        Get the token from <strong>Merchemy OS → Settings → API Tokens</strong>, then open <strong>Settings</strong> to paste it in.
+      </p>
+    </div>
 
     <!-- Platform Selector -->
     <section class="section">
@@ -219,6 +205,79 @@
     <div id="logs-section" style="display:none; background:var(--surface2); padding:10px; border-top:1px solid var(--border); max-height:200px; overflow-y:auto; border-bottom-left-radius:8px; border-bottom-right-radius:8px;">
        <ul id="logs-list" style="list-style:none; margin:0; padding:0; font-size:11px; color:var(--text); font-family:monospace; line-height: 1.4;">
        </ul>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ SETTINGS VIEW (in-popup) ═══════════════════ -->
+  <div class="container" id="view-settings" style="display:none;">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <button class="btn-icon" id="btn-settings-back" title="Back" style="color: var(--text); margin-right: 4px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+        </button>
+        <img src="../icons/icon32.png" alt="Logo" class="logo-icon" />
+        <span class="logo-text">Settings</span>
+      </div>
+    </header>
+
+    <!-- ─── VIEW MODE (token already configured) ─── -->
+    <div id="settings-view-mode" style="display:none; flex-direction:column; gap:12px;">
+      <section class="section">
+        <label class="label">Connection</label>
+        <div class="conn-card">
+          <div class="conn-card-row">
+            <span class="conn-dot"></span>
+            <div>
+              <div class="conn-card-org" id="view-org-name">—</div>
+              <div class="conn-card-sub">Connected to Merchemy OS</div>
+            </div>
+          </div>
+          <div class="conn-card-token">
+            <span>API Token</span>
+            <span class="token-mask" id="view-token-mask">••••••••</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button class="btn btn-primary btn-full" id="set-btn-edit" type="button"><span>✏️</span> Edit API Token</button>
+      </div>
+
+      <div class="set-danger-zone">
+        <button class="btn-remove" id="set-btn-remove" type="button">🗑 Remove API Token</button>
+        <span class="hint">Disconnects this extension from your organization. You can add a token again anytime.</span>
+      </div>
+    </div>
+
+    <!-- ─── EDIT MODE (first-time setup or editing) ─── -->
+    <div id="settings-edit-mode" style="display:none; flex-direction:column; gap:12px;">
+      <p class="setup-banner-text" style="padding: 0 2px;">
+        Paste your API Token, then run <strong>Test Connection</strong> — Save unlocks only after the
+        connection succeeds.
+      </p>
+
+      <section class="section">
+        <label class="label" for="set-api-token">Merchemy OS API Token</label>
+        <div class="input-row">
+          <input id="set-api-token" type="password" class="input" placeholder="sk_..." autocomplete="off" />
+          <button class="btn-eye" id="set-btn-token-eye" title="Show/hide" type="button">👁</button>
+        </div>
+        <span class="hint">
+          Create a token in Merchemy OS → Settings → API Tokens, then paste it here.
+          This token is already tied to a specific organization (org) — no login or org selection needed in the extension.
+        </span>
+        <div class="actions" style="margin-top: 6px;">
+          <button class="btn btn-secondary" id="set-btn-test" type="button" style="flex: 0 0 auto; padding: 7px 14px;">Test Connection</button>
+          <span class="conn-status" id="set-conn-status"></span>
+        </div>
+      </section>
+
+      <div class="actions" style="margin-top: 4px;">
+        <button class="btn btn-secondary btn-full" id="set-btn-cancel" type="button">Cancel</button>
+        <button class="btn btn-primary btn-full" id="set-btn-save" disabled><span>💾</span> Save</button>
+      </div>
+      <span class="save-status" id="set-save-status" style="text-align:center;"></span>
     </div>
   </div>
 

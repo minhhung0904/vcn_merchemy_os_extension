@@ -296,7 +296,117 @@ body.light-theme::-webkit-scrollbar-thumb {
 .preview-table tr:hover td { background: var(--surface); }
 
 /* ── Actions ── */
-.actions { display: flex; gap: 8px; }
+.actions { display: flex; gap: 8px; align-items: center; }
+
+/* ── Settings entry button ── */
+.btn-settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  transition: all 0.2s;
+}
+.btn-settings:hover { border-color: var(--accent); color: var(--accent2); }
+.btn-settings svg { width: 14px; height: 14px; }
+
+/* ── Config banner ── */
+.setup-banner {
+  background: rgba(20, 184, 166, 0.10);
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.setup-banner:hover { background: rgba(20, 184, 166, 0.16); }
+.setup-banner-head { display: flex; align-items: center; gap: 8px; }
+.setup-banner-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex: 0 0 auto;
+  animation: warn-pulse 1.3s ease-in-out infinite;
+}
+@keyframes warn-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.18); opacity: 0.7; }
+}
+.setup-banner-title { font-size: 13px; font-weight: 700; color: var(--accent2); }
+.setup-banner-text { font-size: 12px; color: var(--muted); line-height: 1.55; }
+
+/* ── Settings view ── */
+.hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.conn-status { font-size: 12px; display: flex; align-items: center; gap: 6px; min-height: 16px; }
+.conn-status.ok { color: var(--green); }
+.conn-status.err { color: var(--red); }
+.conn-status.loading { color: var(--muted); }
+.save-status { font-size: 12px; color: var(--green); min-height: 16px; }
+.save-status.err { color: var(--red); }
+
+/* ── Connection card (settings view mode) ── */
+.conn-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.conn-card-row { display: flex; align-items: center; gap: 10px; }
+.conn-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--green); flex: 0 0 auto;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+.conn-card-org { font-size: 14px; font-weight: 700; color: var(--text); }
+.conn-card-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.conn-card-token {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
+}
+.token-mask {
+  font-family: monospace; font-size: 12px; letter-spacing: 1px;
+  color: var(--text); text-transform: none;
+}
+
+/* ── Remove / danger zone ── */
+.set-danger-zone {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.btn-remove {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.btn-remove:hover { background: rgba(239, 68, 68, 0.12); }
+.btn-remove.confirm { background: var(--red); color: #fff; }
+
 .btn {
   flex: 1;
   display: flex;

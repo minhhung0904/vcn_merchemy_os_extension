@@ -25,38 +25,276 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  bindSetupEvents();
+  bindSettingsEvents();
   bindMainEvents();
   checkAuth();
 });
 
+// Always land on the main view; Settings is reachable via the ⚙ button.
 async function checkAuth() {
-  const { apiToken } = await storage.get(["apiToken"]);
-  if (apiToken) {
-    showView("main");
-    loadMainPrefs();
-    forceDetectShopInfo(true);
-  } else {
-    showView("setup");
+  showView("main");
+  const { apiToken, orgName } = await storage.get(["apiToken", "orgName"]);
+  updateConfigState(apiToken, orgName);
+  loadMainPrefs();
+  forceDetectShopInfo(true);
+}
+
+// Toggle the config banner + footer status based on whether the token is set.
+function updateConfigState(apiToken, orgName) {
+  const configured = !!apiToken;
+  const banner = getEl("setup-banner");
+  if (banner) banner.style.display = configured ? "none" : "flex";
+  const apiStatus = getEl("api-status");
+  if (apiStatus) {
+    apiStatus.textContent = configured
+      ? `🟢 ${orgName || "API Token configured"}`
+      : "🔴 Not configured — click Settings";
   }
 }
 
 // ─── View switching ───────────────────────────────────────────────────────────
 
 function showView(name) {
-  document.getElementById("view-setup").style.display =
-    name === "setup" ? "flex" : "none";
   document.getElementById("view-main").style.display =
     name === "main" ? "flex" : "none";
+  document.getElementById("view-settings").style.display =
+    name === "settings" ? "flex" : "none";
 }
 
-// ─── Setup (no API token configured yet) ─────────────────────────────────────
+// ─── In-popup Settings ────────────────────────────────────────────────────────
 
-function bindSetupEvents() {
-  const btnOpenSettings = document.getElementById("btn-open-settings");
-  if (btnOpenSettings) {
-    btnOpenSettings.addEventListener("click", () => {
-      chrome.runtime.openOptionsPage();
+// The token that most recently passed a Test Connection, plus its org label.
+// Save is only allowed for a token that matches settingsTestedToken.
+let settingsTestedToken = null;
+let settingsOrgLabel = "";
+// The currently saved token/org (what View mode displays).
+let settingsSavedToken = "";
+let settingsSavedOrg = "";
+
+// Pull the organization NAME out of an /auth/me response, tolerating the
+// various shapes the API may use. Never falls back to email.
+function extractOrgName(response) {
+  const d = response?.data ?? response ?? {};
+  const u = d.user ?? {};
+  const candidates = [
+    d.organizationName, d.organization_name, d.orgName,
+    d.organization?.name, d.organization?.title, d.organization?.displayName,
+    d.org?.name, d.org?.title,
+    u.organizationName, u.organization_name, u.orgName,
+    u.organization?.name, u.organization?.title, u.organization?.displayName,
+    u.org?.name, u.org?.title,
+  ];
+  const found = candidates.find((v) => typeof v === "string" && v.trim());
+  return found ? found.trim() : "";
+}
+
+function setSaveEnabled(enabled) {
+  const btnSave = getEl("set-btn-save");
+  if (btnSave) btnSave.disabled = !enabled;
+}
+
+function maskToken(t) {
+  if (!t) return "";
+  if (t.length <= 8) return "••••••••";
+  return `${t.slice(0, 3)}${"•".repeat(8)}${t.slice(-4)}`;
+}
+
+function showSettingsMode(mode) {
+  getEl("settings-view-mode").style.display = mode === "view" ? "flex" : "none";
+  getEl("settings-edit-mode").style.display = mode === "edit" ? "flex" : "none";
+}
+
+// Render the read-only View mode from the saved token/org.
+function renderSettingsViewMode() {
+  getEl("view-org-name").textContent = settingsSavedOrg || "your organization";
+  getEl("view-token-mask").textContent = maskToken(settingsSavedToken);
+  showSettingsMode("view");
+}
+
+// Switch into the editable mode. Pass the existing token to prefill (already
+// validated → Save enabled), or "" for a fresh entry (Save locked until test).
+function enterSettingsEditMode(token) {
+  const input = getEl("set-api-token");
+  input.value = token || "";
+  input.type = "password";
+  getEl("set-btn-token-eye").textContent = "👁";
+  getEl("set-conn-status").className = "conn-status";
+  getEl("set-conn-status").textContent = "";
+  getEl("set-save-status").className = "save-status";
+  getEl("set-save-status").textContent = "";
+
+  if (token) {
+    settingsTestedToken = token;
+    settingsOrgLabel = settingsSavedOrg;
+    setSaveEnabled(true);
+  } else {
+    settingsTestedToken = null;
+    settingsOrgLabel = "";
+    setSaveEnabled(false);
+  }
+  showSettingsMode("edit");
+}
+
+function openSettingsView() {
+  storage.get(["apiToken", "orgName"]).then((data) => {
+    settingsSavedToken = data.apiToken || "";
+    settingsSavedOrg = data.orgName || "";
+
+    if (settingsSavedToken) {
+      renderSettingsViewMode();   // configured → read-only view first
+    } else {
+      enterSettingsEditMode("");  // first-time → straight to edit
+    }
+    showView("settings");
+  });
+}
+
+function bindSettingsEvents() {
+  // Back → main view
+  const btnBack = getEl("btn-settings-back");
+  if (btnBack) btnBack.addEventListener("click", () => checkAuth());
+
+  // Enter edit mode from view mode
+  const btnEdit = getEl("set-btn-edit");
+  if (btnEdit) btnEdit.addEventListener("click", () => enterSettingsEditMode(settingsSavedToken));
+
+  // Cancel editing → back to view mode if a token is saved, else back to main
+  const btnCancel = getEl("set-btn-cancel");
+  if (btnCancel) {
+    btnCancel.addEventListener("click", () => {
+      if (settingsSavedToken) renderSettingsViewMode();
+      else checkAuth();
+    });
+  }
+
+  // Show / hide token
+  const btnEye = getEl("set-btn-token-eye");
+  if (btnEye) {
+    btnEye.addEventListener("click", () => {
+      const input = getEl("set-api-token");
+      const hidden = input.type === "password";
+      input.type = hidden ? "text" : "password";
+      btnEye.textContent = hidden ? "🙈" : "👁";
+    });
+  }
+
+  // Editing the token invalidates any previous test → must re-test before saving
+  const tokenInput = getEl("set-api-token");
+  if (tokenInput) {
+    tokenInput.addEventListener("input", () => {
+      const token = tokenInput.value.trim();
+      if (token !== settingsTestedToken) {
+        setSaveEnabled(false);
+        const statusEl = getEl("set-conn-status");
+        statusEl.className = "conn-status";
+        statusEl.textContent = token ? "Test connection to enable Save." : "";
+        getEl("set-save-status").textContent = "";
+      }
+    });
+  }
+
+  // Test connection
+  const btnTest = getEl("set-btn-test");
+  if (btnTest) {
+    btnTest.addEventListener("click", async () => {
+      const statusEl = getEl("set-conn-status");
+      const token = getEl("set-api-token").value.trim();
+
+      if (!token) {
+        statusEl.className = "conn-status err";
+        statusEl.textContent = "🔴 Please enter an API token first.";
+        setSaveEnabled(false);
+        return;
+      }
+
+      statusEl.className = "conn-status loading";
+      statusEl.textContent = "⏳ Testing…";
+      setSaveEnabled(false);
+
+      try {
+        const res = await fetch(`${DEFAULT_API_URL}/auth/me`, {
+          method: "GET",
+          headers: { "x-api-key": token },
+        });
+        const response = await res.json().catch(() => ({}));
+
+        if (!res.ok || !response.success) {
+          throw new Error(response.error?.message || response.error || `HTTP ${res.status}`);
+        }
+
+        const orgName = extractOrgName(response);
+        if (!orgName) {
+          console.warn("[Settings] Could not find org name in /auth/me response:", response);
+        }
+        const label = orgName || "your organization";
+
+        settingsTestedToken = token;
+        settingsOrgLabel = label;
+        statusEl.className = "conn-status ok";
+        statusEl.textContent = `🟢 Connected — ${label}`;
+        setSaveEnabled(true);
+      } catch (err) {
+        settingsTestedToken = null;
+        settingsOrgLabel = "";
+        statusEl.className = "conn-status err";
+        statusEl.textContent = `🔴 ${err.message || "Connection failed."}`;
+        setSaveEnabled(false);
+      }
+    });
+  }
+
+  // Save (only enabled after a successful test)
+  const btnSave = getEl("set-btn-save");
+  if (btnSave) {
+    btnSave.addEventListener("click", async () => {
+      const token = getEl("set-api-token").value.trim();
+      const statusEl = getEl("set-save-status");
+
+      if (!token || token !== settingsTestedToken) {
+        statusEl.className = "save-status err";
+        statusEl.textContent = "⚠️ Test connection successfully before saving.";
+        setSaveEnabled(false);
+        return;
+      }
+
+      await storage.set({ apiToken: token, orgName: settingsOrgLabel });
+      settingsSavedToken = token;
+      settingsSavedOrg = settingsOrgLabel;
+      renderSettingsViewMode();   // back to read-only view showing the org
+    });
+  }
+
+  // Remove API Token (two-step confirm to avoid accidental removal)
+  const btnRemove = getEl("set-btn-remove");
+  let removeArmed = false;
+  let removeTimer = null;
+  const resetRemoveBtn = () => {
+    removeArmed = false;
+    if (removeTimer) clearTimeout(removeTimer);
+    if (btnRemove) {
+      btnRemove.classList.remove("confirm");
+      btnRemove.textContent = "🗑 Remove API Token";
+    }
+  };
+  if (btnRemove) {
+    btnRemove.addEventListener("click", async () => {
+      // First click arms the confirm; auto-resets after a few seconds
+      if (!removeArmed) {
+        removeArmed = true;
+        btnRemove.classList.add("confirm");
+        btnRemove.textContent = "⚠️ Click again to confirm";
+        removeTimer = setTimeout(resetRemoveBtn, 3000);
+        return;
+      }
+
+      resetRemoveBtn();
+      await storage.remove(["apiToken", "orgName"]);
+      settingsSavedToken = "";
+      settingsSavedOrg = "";
+      settingsTestedToken = null;
+      settingsOrgLabel = "";
+      enterSettingsEditMode("");   // drop into empty edit mode to add a new one
+      getEl("set-save-status").textContent = "🗑 API Token removed.";
     });
   }
 }
@@ -403,7 +641,15 @@ function bindMainEvents() {
   const btnOpenSettingsMain = getEl("btn-open-settings-main");
   if (btnOpenSettingsMain) {
     btnOpenSettingsMain.addEventListener("click", () => {
-      chrome.runtime.openOptionsPage();
+      openSettingsView();
+    });
+  }
+
+  // Whole config banner is clickable → open Settings
+  const setupBanner = getEl("setup-banner");
+  if (setupBanner) {
+    setupBanner.addEventListener("click", () => {
+      openSettingsView();
     });
   }
 
@@ -728,6 +974,12 @@ function bindMainEvents() {
 // ─── Scrape ───────────────────────────────────────────────────────────────────
 
 async function onScrape() {
+  const { apiToken } = await storage.get(["apiToken"]);
+  if (!apiToken) {
+    setStatus("error", "⚙️", "API Token not configured. Open Settings to enter your token before fetching orders.", true);
+    return;
+  }
+
   setStatus("loading", "⏳", "Connecting to Etsy API…");
   getEl("btn-scrape").disabled = true;
   showProgress('scrape');
@@ -958,4 +1210,5 @@ function trunc(s, n) {
 const storage = {
   get: (keys) => new Promise((r) => chrome.storage.local.get(keys, r)),
   set: (data) => new Promise((r) => chrome.storage.local.set(data, r)),
+  remove: (keys) => new Promise((r) => chrome.storage.local.remove(keys, r)),
 };
