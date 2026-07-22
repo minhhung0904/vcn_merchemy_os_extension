@@ -7,8 +7,8 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <!-- ═══════════════════ LOGIN VIEW ═══════════════════ -->
-  <div class="container" id="view-login">
+  <!-- ═══════════════════ SETUP VIEW (no API token configured) ═══════════════════ -->
+  <div class="container" id="view-setup">
     <header class="header">
       <div class="logo">
         <img src="../icons/icon32.png" alt="Logo" class="logo-icon" />
@@ -17,56 +17,19 @@
     </header>
 
     <div class="login-hero">
-      <p class="login-sub">Sign in to start syncing Etsy orders</p>
+      <p class="login-sub">Chưa cấu hình API Token</p>
     </div>
 
     <div class="login-form">
-      <div class="field-group">
-        <label class="label" for="login-email">Email</label>
-        <input type="email" id="login-email" class="input" placeholder="you@example.com" autocomplete="email" />
-      </div>
-      <div class="field-group">
-        <label class="label" for="login-password">Password</label>
-        <div class="input-row">
-          <input type="password" id="login-password" class="input" placeholder="••••••••" autocomplete="current-password" />
-          <button class="btn-eye" id="btn-login-eye" title="Show/hide">👁</button>
-        </div>
-      </div>
+      <p style="font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 16px;">
+        Vào <strong>Settings</strong> để dán API Token của tổ chức (org) bạn,
+        lấy từ Merchemy OS → Settings → API Tokens.
+      </p>
 
-      <div class="login-error" id="login-error" style="display:none;"></div>
+      <div class="login-error" id="setup-error" style="display:none;"></div>
 
-      <button class="btn btn-primary btn-full" id="btn-login">
-        <span id="btn-login-label">Sign In</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- ═══════════════════ ORG SELECT VIEW ═══════════════════ -->
-  <div class="container" id="view-org" style="display:none;">
-    <header class="header">
-      <div class="logo">
-        <img src="../icons/icon32.png" alt="Logo" class="logo-icon" />
-        <span class="logo-text">Sellfern</span>
-      </div>
-    </header>
-
-    <div class="login-hero">
-      <p class="login-sub">Select your organization to continue</p>
-    </div>
-
-    <div class="login-form">
-      <div class="field-group">
-        <label class="label" for="org-select">Organization</label>
-        <select id="org-select" class="input"></select>
-      </div>
-
-      <div class="login-error" id="org-error" style="display:none;"></div>
-
-      <button class="btn btn-primary btn-full" id="btn-org-select">
-        <span id="btn-org-label">Continue</span>
-      </button>
-      <button class="btn btn-secondary btn-full" style="margin-top: 10px;" id="btn-org-cancel">
-        Cancel
+      <button class="btn btn-primary btn-full" id="btn-open-settings">
+        Open Settings
       </button>
     </div>
   </div>
@@ -80,19 +43,12 @@
         <span class="logo-text">Sellfern</span>
       </div>
       <div class="header-right">
-        <div class="user-info">
-          <div class="org-row">
-            <span class="org-badge" id="org-badge"></span>
-            <button class="btn-icon-sm" id="btn-switch-org" title="Switch Organization">🔄</button>
-          </div>
-          <span class="user-badge" id="user-badge"></span>
-        </div>
         <label class="theme-toggle" title="Toggle Theme" style="margin-right: 8px;">
           <input type="checkbox" id="btn-theme-toggle">
           <div class="slider"></div>
         </label>
-        <button class="btn-icon" id="btn-logout" title="Sign out" style="color: var(--text);">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        <button class="btn-icon" id="btn-open-settings-main" title="Settings" style="color: var(--text);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         </button>
       </div>
     </header>

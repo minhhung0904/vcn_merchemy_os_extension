@@ -3,9 +3,6 @@
 const DEFAULT_API_URL = window.DEFAULT_API_URL || "http://localhost:3000/api/v2";
 
 let scrapedOrders = [];
-let currentUser = null;
-let tempAuthToken = null;
-let tempAuthEmail = null;
 let lastSavedSettings = {};
 let isCancelling = false;
 let currentAction = null;
@@ -16,39 +13,6 @@ const DEFAULT_ORDER_STATES = [
   { id: '', label: 'New' },
   { id: '', label: 'Completed' }
 ];
-
-// ─── Refresh Token Helpers ──────────────────────────────────────────────────────
-
-async function refreshFullToken() {
-  const { refreshToken } = await storage.get(["refreshToken"]);
-  if (!refreshToken) throw new Error("No refresh token");
-  const res = await fetch(DEFAULT_API_URL + "/auth/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refreshToken })
-  });
-  const response = await res.json();
-  if (!res.ok || !response.success) throw new Error(response.error?.message || "Refresh failed");
-  const data = response.data;
-  await storage.set({ authToken: data.token, refreshToken: data.refreshToken });
-  return data.token;
-}
-
-async function refreshTempToken() {
-  const { tempRefreshToken } = await storage.get(["tempRefreshToken"]);
-  if (!tempRefreshToken) throw new Error("No temp refresh token");
-  const res = await fetch(DEFAULT_API_URL + "/auth/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refreshToken: tempRefreshToken })
-  });
-  const response = await res.json();
-  if (!res.ok || !response.success) throw new Error(response.error?.message || "Refresh failed");
-  const data = response.data;
-  tempAuthToken = data.tempToken;
-  await storage.set({ tempAuthToken: data.tempToken, tempRefreshToken: data.tempRefreshToken });
-  return data.tempToken;
-}
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
@@ -61,269 +25,40 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  bindLoginEvents();
-  bindOrgEvents();
+  bindSetupEvents();
   bindMainEvents();
   checkAuth();
 });
 
 async function checkAuth() {
-  const { authToken, userEmail } = await storage.get([
-    "authToken",
-    "userEmail",
-  ]);
-  if (authToken) {
-    currentUser = userEmail;
+  const { apiToken } = await storage.get(["apiToken"]);
+  if (apiToken) {
     showView("main");
     loadMainPrefs();
     forceDetectShopInfo(true);
   } else {
-    showView("login");
+    showView("setup");
   }
 }
 
 // ─── View switching ───────────────────────────────────────────────────────────
 
 function showView(name) {
-  document.getElementById("view-login").style.display =
-    name === "login" ? "flex" : "none";
-  document.getElementById("view-org").style.display =
-    name === "org" ? "flex" : "none";
+  document.getElementById("view-setup").style.display =
+    name === "setup" ? "flex" : "none";
   document.getElementById("view-main").style.display =
     name === "main" ? "flex" : "none";
+}
 
-  if (name === "main" && currentUser) {
-    const badge = document.getElementById("user-badge");
-    if (badge) badge.textContent = currentUser;
-    
-    storage.get(["activeOrgName"]).then(res => {
-      const orgBadge = document.getElementById("org-badge");
-      if (orgBadge) orgBadge.textContent = res.activeOrgName || "No Organization";
+// ─── Setup (no API token configured yet) ─────────────────────────────────────
+
+function bindSetupEvents() {
+  const btnOpenSettings = document.getElementById("btn-open-settings");
+  if (btnOpenSettings) {
+    btnOpenSettings.addEventListener("click", () => {
+      chrome.runtime.openOptionsPage();
     });
   }
-}
-
-// ─── Login ────────────────────────────────────────────────────────────────────
-
-function bindLoginEvents() {
-  const emailEl = document.getElementById("login-email");
-  const passEl = document.getElementById("login-password");
-  const btnLogin = document.getElementById("btn-login");
-  const btnEye = document.getElementById("btn-login-eye");
-  const errEl = document.getElementById("login-error");
-
-  // Allow Enter key to submit
-  [emailEl, passEl].forEach((el) => {
-    el.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") btnLogin.click();
-    });
-  });
-
-  // Show / hide password
-  btnEye.addEventListener("click", () => {
-    const hidden = passEl.type === "password";
-    passEl.type = hidden ? "text" : "password";
-    btnEye.textContent = hidden ? "🙈" : "👁";
-  });
-
-  btnLogin.addEventListener("click", async () => {
-    const email = emailEl.value.trim();
-    const password = passEl.value;
-
-    // Validate
-    errEl.style.display = "none";
-    if (!email || !password) {
-      showLoginError("Please enter your email and password.");
-      return;
-    }
-
-    setLoginLoading(true);
-
-    try {
-      const url = DEFAULT_API_URL + "/auth/login";
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const response = await res.json().catch(() => ({}));
-
-      // Handle new response format
-      if (!res.ok || !response.success) {
-        throw new Error(
-          response.error?.message || response.error || `Login failed (${res.status})`,
-        );
-      }
-
-      const data = response.data;
-
-      // Might require org selection for multi-org accounts
-      if (data.tempToken && data.organizations?.length > 1) {
-        tempAuthToken = data.tempToken;
-        tempAuthEmail = data.user?.email || email;
-        
-        // Persist for switching later
-        await storage.set({ 
-          tempAuthToken: data.tempToken, 
-          tempRefreshToken: data.tempRefreshToken,
-          organizations: data.organizations 
-        });
-
-        const selectEl = document.getElementById("org-select");
-        selectEl.innerHTML = "";
-        data.organizations.forEach((org) => {
-          const opt = document.createElement("option");
-          opt.value = org.id;
-          opt.textContent = org.name;
-          selectEl.appendChild(opt);
-        });
-        showView("org");
-        return; // Pause login flow until org is selected
-      } else if (data.tempToken && data.organizations?.length === 1) {
-        // Auto-select first org
-        const orgRes = await fetch(
-          DEFAULT_API_URL + "/auth/select-organization",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${data.tempToken}`,
-            },
-            body: JSON.stringify({ organizationId: data.organizations[0].id }),
-          },
-        );
-        const orgResponse = await orgRes.json().catch(() => ({}));
-        if (orgRes.ok && orgResponse.success && orgResponse.data?.token) {
-          const orgData = orgResponse.data;
-          await saveAuth(orgData.token, orgData.refreshToken, orgData.user?.email || data.user?.email || email, data.organizations[0].name);
-        } else {
-          throw new Error(orgResponse.error?.message || orgResponse.error || "Organization selection failed.");
-        }
-      } else if (data.token) {
-        await saveAuth(data.token, data.refreshToken, data.user?.email || email, "Personal");
-      } else {
-        throw new Error("No token received from server.");
-      }
-
-      currentUser = email;
-      showView("main");
-      loadMainPrefs();
-      forceDetectShopInfo(true);
-    } catch (err) {
-      showLoginError(err.message);
-    } finally {
-      setLoginLoading(false);
-    }
-  });
-}
-
-function bindOrgEvents() {
-  const btnSelect = document.getElementById("btn-org-select");
-  const btnCancel = document.getElementById("btn-org-cancel");
-  const selectEl = document.getElementById("org-select");
-  const errEl = document.getElementById("org-error");
-
-  btnCancel.addEventListener("click", async () => {
-    const { authToken } = await storage.get(["authToken"]);
-    if (authToken) {
-      showView("main");
-    } else {
-      tempAuthToken = null;
-      tempAuthEmail = null;
-      showView("login");
-    }
-  });
-
-  btnSelect.addEventListener("click", async () => {
-    errEl.style.display = "none";
-    const orgId = selectEl.value;
-    if (!orgId) return;
-
-    btnSelect.disabled = true;
-    document.getElementById("btn-org-label").textContent = "Continuing...";
-
-    try {
-      let orgRes = await fetch(
-        DEFAULT_API_URL + "/auth/select-organization",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${tempAuthToken}`,
-          },
-          body: JSON.stringify({ organizationId: parseInt(orgId, 10) }),
-        },
-      );
-      
-      let orgResponse = await orgRes.json().catch(() => ({}));
-      
-      if (orgRes.status === 401) {
-        try {
-          const newToken = await refreshTempToken();
-          const retryRes = await fetch(
-        DEFAULT_API_URL + "/auth/select-organization",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${newToken}`,
-              },
-              body: JSON.stringify({ organizationId: parseInt(orgId, 10) }),
-            },
-          );
-          orgResponse = await retryRes.json().catch(() => ({}));
-          orgRes = retryRes;
-        } catch (refreshErr) {
-          throw new Error("Session expired. Please re-login.");
-        }
-      }
-
-      if (orgRes.ok && orgResponse.success && orgResponse.data?.token) {
-        const orgData = orgResponse.data;
-        const orgName = selectEl.options[selectEl.selectedIndex].text;
-        await saveAuth(orgData.token, orgData.refreshToken, orgData.user?.email || tempAuthEmail, orgName);
-        currentUser = tempAuthEmail;
-        tempAuthToken = null;
-        tempAuthEmail = null;
-        
-        showView("main");
-        loadMainPrefs();
-        forceDetectShopInfo(true);
-      } else {
-        throw new Error(orgResponse.error?.message || orgResponse.error || "Organization selection failed.");
-      }
-    } catch (err) {
-      errEl.textContent = err.message;
-      errEl.style.display = "block";
-    } finally {
-      btnSelect.disabled = false;
-      document.getElementById("btn-org-label").textContent = "Continue";
-    }
-  });
-}
-
-function showLoginError(msg) {
-  const errEl = document.getElementById("login-error");
-  errEl.textContent = msg;
-  errEl.style.display = "block";
-}
-
-function setLoginLoading(on) {
-  const btn = document.getElementById("btn-login");
-  const lbl = document.getElementById("btn-login-label");
-  btn.disabled = on;
-  lbl.textContent = on ? "Signing in…" : "Sign In";
-}
-
-async function saveAuth(token, refreshToken, email, orgName) {
-  await storage.set({ 
-    authToken: token,
-    refreshToken: refreshToken,
-    userEmail: email,
-    activeOrgName: orgName 
-  });
 }
 
 // ─── Logging Utility ────────────────────────────────────────────────────────
@@ -333,24 +68,6 @@ async function addSystemLog(type, message) {
   if (systemLogs.length > 50) systemLogs.pop();
   await storage.set({ systemLogs });
 }
-
-// ─── Logout ───────────────────────────────────────────────────────────────────
-
-document.getElementById("btn-logout").addEventListener("click", async () => {
-  await storage.set({ 
-    authToken: "",
-    refreshToken: "",
-    userEmail: "", 
-    activeOrgName: "",
-    organizations: [],
-    tempAuthToken: "",
-    tempRefreshToken: ""
-  });
-  currentUser = null;
-  scrapedOrders = [];
-  clearPreview();
-  showView("login");
-});
 
 // ─── Main prefs ───────────────────────────────────────────────────────────────
 
@@ -446,30 +163,17 @@ function updateStoreWarningUI(storeName, registered) {
 async function isStoreRegistered(storeName) {
   if (!storeName) return false;
   try {
-    const { authToken } = await storage.get(["authToken"]);
+    const { apiToken } = await storage.get(["apiToken"]);
+    if (!apiToken) return true; // Not configured yet — don't block the UI here
+
     const url = DEFAULT_API_URL + "/stores";
-    let res = await fetch(url, {
+    const res = await fetch(url, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${authToken}`
+        "x-api-key": apiToken
       }
     });
-
-    if (res.status === 401) {
-      try {
-        const newToken = await refreshFullToken();
-        res = await fetch(url, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${newToken}`
-          }
-        });
-      } catch (err) {
-        // Refresh failed, allow network logic to handle it
-      }
-    }
 
     if (!res.ok) return true; // If API fails, allow to avoid blocking
     const response = await res.json();
@@ -695,24 +399,13 @@ function bindMainEvents() {
     storage.set({ orderStateId });
   });
 
-  // Switch organization
-  getEl("btn-switch-org").addEventListener("click", async () => {
-    const { organizations, tempAuthToken: storedTempToken } = await storage.get(["organizations", "tempAuthToken"]);
-    if (organizations && organizations.length > 0) {
-      tempAuthToken = storedTempToken;
-      const selectEl = document.getElementById("org-select");
-      selectEl.innerHTML = "";
-      organizations.forEach((org) => {
-        const opt = document.createElement("option");
-        opt.value = org.id;
-        opt.textContent = org.name;
-        selectEl.appendChild(opt);
-      });
-      showView("org");
-    } else {
-      setStatus("error", "❌", "No other organizations found. Please re-login.", true);
-    }
-  });
+  // Open Settings (to change the API token)
+  const btnOpenSettingsMain = getEl("btn-open-settings-main");
+  if (btnOpenSettingsMain) {
+    btnOpenSettingsMain.addEventListener("click", () => {
+      chrome.runtime.openOptionsPage();
+    });
+  }
 
   // Persist shop ID
   getEl("input-shopid").addEventListener("change", () => {

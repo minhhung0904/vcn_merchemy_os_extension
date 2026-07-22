@@ -13,28 +13,32 @@
       </header>
 
       <main class="main">
-        <!-- Account -->
+        <!-- API Token -->
         <section class="card">
-          <h2 class="card-title">Account</h2>
-          <div class="user-row" id="user-row-loggedin" style="display: none">
-            <div class="user-info">
-              <span class="user-avatar">👤</span>
-              <div>
-                <div class="user-email" id="s-user-email">—</div>
-                <div class="user-status">🟢 Signed in</div>
-              </div>
+          <h2 class="card-title">API Token</h2>
+          <div class="field">
+            <label for="api-token">Merchemy OS API Token</label>
+            <div class="input-row">
+              <input
+                id="api-token"
+                type="password"
+                class="input"
+                placeholder="sk_..."
+                autocomplete="off"
+              />
+              <button class="btn-eye" id="btn-token-eye" title="Show/hide" type="button">👁</button>
             </div>
-            <button class="btn btn-outline btn-sm" id="btn-signout">
-              Sign Out
-            </button>
-          </div>
-          <div class="user-row" id="user-row-loggedout" style="display: none">
-            <span style="font-size: 13px; color: var(--muted)"
-              >Not signed in.</span
+            <span class="hint"
+              >Tạo token tại Merchemy OS → Settings → API Tokens, rồi dán vào
+              đây. Token này đã gắn sẵn với 1 tổ chức (org) cụ thể — không cần
+              đăng nhập hay chọn org trong extension nữa.</span
             >
-            <button class="btn btn-primary btn-sm" id="btn-goto-login">
-              Sign In
+          </div>
+          <div class="actions">
+            <button class="btn btn-outline btn-sm" id="btn-test-connection" type="button">
+              Test Connection
             </button>
+            <span class="conn-status" id="conn-status"></span>
           </div>
         </section>
 

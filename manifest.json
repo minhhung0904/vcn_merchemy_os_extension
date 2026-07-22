@@ -23,6 +23,8 @@
     "type": "module"
   },
 
+  "options_page": "settings/settings.html",
+
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {

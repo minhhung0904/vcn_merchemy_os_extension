@@ -83,3 +83,15 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .user-email  { font-size: 13px; font-weight: 600; color: var(--text); }
 .user-status { font-size: 11px; color: var(--green); margin-top: 2px; }
 .btn-sm      { padding: 6px 12px; font-size: 12px; flex: 0; }
+
+/* Token input row */
+.input-row { display: flex; gap: 8px; }
+.input-row .input { flex: 1; }
+.btn-eye { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; color: var(--text); cursor: pointer; font-size: 14px; }
+.btn-eye:hover { border-color: var(--accent); }
+
+/* Connection status */
+.conn-status { font-size: 12px; display: flex; align-items: center; gap: 6px; min-height: 16px; }
+.conn-status.ok { color: var(--green); }
+.conn-status.err { color: var(--red); }
+.conn-status.loading { color: var(--muted); }

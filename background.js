@@ -27,11 +27,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "GET_SETTINGS") {
     chrome.storage.local.get(
-      ["authToken", "defaultStore"],
+      ["apiToken", "defaultStore"],
       (data) => {
         sendResponse({
           apiUrl: DEFAULT_API_URL,
-          authToken: data.authToken || "",
+          apiToken: data.apiToken || "",
           defaultStore: data.defaultStore || "",
         });
       },
@@ -40,36 +40,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// ─── Refresh Token Helper ─────────────────────────────────────────────────────
-
-async function refreshFullToken() {
-  const { refreshToken } = await new Promise(res => chrome.storage.local.get(["refreshToken"], res));
-  if (!refreshToken) throw new Error("No refresh token");
-  const url = DEFAULT_API_URL + "/auth/refresh";
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refreshToken })
-  });
-  const response = await res.json();
-  if (!res.ok || !response.success) throw new Error(response.error?.message || "Refresh failed");
-  const data = response.data;
-  await new Promise(res => chrome.storage.local.set({ authToken: data.token, refreshToken: data.refreshToken }, res));
-  return data.token;
-}
-
 // ─── Push orders to Sellfern ─────────────────────────────────────────────────
 
 async function handlePushOrders(orders) {
-  let { authToken, defaultStore } = await getSettings();
+  const { apiToken, defaultStore } = await getSettings();
 
-  if (!authToken)
-    throw new Error("Not logged in. Please sign in via the extension popup.");
+  if (!apiToken)
+    throw new Error("No API token configured. Please set it in the extension Settings.");
   if (!orders?.length) throw new Error("No orders to push.");
 
   const storeName = defaultStore || orders[0]?.storeName;
   if (storeName) {
-    const isRegistered = await checkStoreRegistered(storeName, authToken);
+    const isRegistered = await checkStoreRegistered(storeName, apiToken);
     if (!isRegistered) {
       throw new Error(`Store "${storeName}" is not in this organization. Please contact your admin to add this store before pushing to Sellfern.`);
     }
@@ -82,31 +64,17 @@ async function handlePushOrders(orders) {
   for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
     if (cancelPushFlag) break;
     const chunk = orders.slice(i, i + CHUNK_SIZE);
-    let res = await fetch(`${DEFAULT_API_URL}/orders/bulk`, {
+    const res = await fetch(`${DEFAULT_API_URL}/orders/bulk`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
+        "x-api-key": apiToken,
       },
       body: JSON.stringify({ orders: chunk }),
     });
 
     if (res.status === 401) {
-      try {
-        authToken = await refreshFullToken();
-        res = await fetch(`${DEFAULT_API_URL}/orders/bulk`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: JSON.stringify({ orders: chunk }),
-        });
-      } catch (err) {
-        // Token expired — clear it so next popup open shows login
-        chrome.storage.local.set({ authToken: "", refreshToken: "" });
-        throw new Error("Session expired. Please sign in again.");
-      }
+      throw new Error("Invalid or expired API token. Please update it in the extension Settings.");
     }
 
     if (!res.ok) {
@@ -127,9 +95,9 @@ async function handlePushOrders(orders) {
 
 function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["authToken", "defaultStore"], (data) => {
+    chrome.storage.local.get(["apiToken", "defaultStore"], (data) => {
       resolve({
-        authToken: data.authToken || "",
+        apiToken: data.apiToken || "",
         defaultStore: data.defaultStore || "",
       });
     });
@@ -143,32 +111,18 @@ async function addSystemLog(type, message) {
   await new Promise((res) => chrome.storage.local.set({ systemLogs }, res));
 }
 
-async function checkStoreRegistered(storeName, authToken) {
+async function checkStoreRegistered(storeName, apiToken) {
   if (!storeName) return true;
   try {
     const url = DEFAULT_API_URL + "/stores";
-    let res = await fetch(url, {
+    const res = await fetch(url, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${authToken}`
+        "x-api-key": apiToken
       }
     });
 
-    if (res.status === 401) {
-      try {
-        authToken = await refreshFullToken();
-        res = await fetch(url, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${authToken}`
-          }
-        });
-      } catch (err) {
-        // Allow fallback behaviour to skip validation if auth fails
-      }
-    }
     if (!res.ok) return true; // Ignore validation if API is unreachable
     const response = await res.json();
     const stores = response.success ? response.data : response;
