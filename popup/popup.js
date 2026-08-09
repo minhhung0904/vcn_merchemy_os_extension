@@ -6,6 +6,7 @@ let scrapedOrders = [];
 let lastSavedSettings = {};
 let isCancelling = false;
 let currentAction = null;
+let selectedPlatform = 'etsy';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,325 @@ const DEFAULT_ORDER_STATES = [
   { id: '', label: 'New' },
   { id: '', label: 'Completed' }
 ];
+
+// Etsy keeps using its original keys (defaultStore/shopId) for backward
+// compatibility with existing installs; Shopify gets its own keys so
+// switching platform tabs doesn't clobber the other platform's saved store.
+function storeKey() { return selectedPlatform === 'shopify' ? 'shopifyStoreName' : 'defaultStore'; }
+function shopIdKey() { return selectedPlatform === 'shopify' ? 'shopifyHandle' : 'shopId'; }
+
+function applyPlatformUI() {
+  const isShopify = selectedPlatform === 'shopify';
+  const labelText = getEl('store-info-text');
+  if (labelText) labelText.textContent = isShopify ? 'Shopify Store Info' : 'Etsy Store Info';
+  const shopifyHint = getEl('shopify-hint');
+  if (shopifyHint) shopifyHint.style.display = isShopify ? 'block' : 'none';
+  const storeMapSection = getEl('shopify-store-map');
+  if (storeMapSection) storeMapSection.style.display = isShopify ? 'block' : 'none';
+  const orderStateSection = getEl('section-order-state');
+  if (orderStateSection) orderStateSection.style.display = isShopify ? 'none' : 'block';
+  const orderStateShopifySection = getEl('section-order-state-shopify');
+  if (orderStateShopifySection) orderStateShopifySection.style.display = isShopify ? 'block' : 'none';
+  const autosyncSection = getEl('section-autosync');
+  if (autosyncSection) autosyncSection.style.display = isShopify ? 'none' : 'block';
+  const autosyncShopifySection = getEl('section-autosync-shopify');
+  if (autosyncShopifySection) autosyncShopifySection.style.display = isShopify ? 'block' : 'none';
+  loadMainPrefs();
+  if (isShopify) {
+    storage.get(['shopifyStoreName']).then(({ shopifyStoreName }) => {
+      if (shopifyStoreName) renderShopifyMapViewMode(shopifyStoreName);
+      else openShopifyMapEditMode();
+    });
+  }
+}
+
+// ─── Shopify → Sellfern store mapping (view/edit, like the Settings token) ──
+
+function showShopifyMapMode(mode) {
+  const viewEl = getEl('shopify-map-view');
+  const editEl = getEl('shopify-map-edit');
+  if (viewEl) viewEl.style.display = mode === 'view' ? 'flex' : 'none';
+  if (editEl) editEl.style.display = mode === 'edit' ? 'flex' : 'none';
+}
+
+function renderShopifyMapViewMode(name) {
+  const el = getEl('shopify-map-view-name');
+  if (el) el.textContent = name || '— no store mapped yet —';
+  showShopifyMapMode('view');
+}
+
+async function openShopifyMapEditMode() {
+  await loadShopifyStoreOptions();
+  const select = getEl('select-shopify-store');
+  const btnSave = getEl('btn-save-shopify-map');
+  if (btnSave) btnSave.disabled = !select?.value;
+  showShopifyMapMode('edit');
+}
+
+// Populate the "Map to Sellfern Store" dropdown from GET /stores (platform=shopify).
+// The browser-detected handle (e.g. "vcn-4") is only a technical identifier used to
+// call the Shopify internal API — it won't necessarily match the store's display
+// name registered in Sellfern, so the merchant must explicitly map the two.
+async function loadShopifyStoreOptions() {
+  const select = getEl('select-shopify-store');
+  if (!select) return;
+
+  const { apiToken } = await storage.get(['apiToken']);
+  if (!apiToken) {
+    select.innerHTML = '<option value="">-- Configure API Token first --</option>';
+    return;
+  }
+
+  select.innerHTML = '<option value="">-- Loading... --</option>';
+  try {
+    const res = await fetch(DEFAULT_API_URL + '/stores', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiToken },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const response = await res.json();
+    const stores = response.success ? response.data : response;
+    const shopifyStores = (stores || []).filter(s => s.platform?.toLowerCase() === 'shopify');
+
+    select.innerHTML = '<option value="">-- Select a Sellfern store --</option>';
+    shopifyStores.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.name;
+      opt.textContent = s.name;
+      select.appendChild(opt);
+    });
+
+    const { shopifyStoreName } = await storage.get(['shopifyStoreName']);
+    if (shopifyStoreName && shopifyStores.some(s => s.name === shopifyStoreName)) {
+      select.value = shopifyStoreName;
+    }
+  } catch (e) {
+    select.innerHTML = '<option value="">-- Failed to load list, click Refresh --</option>';
+  }
+}
+
+// ─── Shopify order state ────────────────────────────────────────────────────
+// A single "Order State" dropdown, same UX as Etsy's. Each option maps to the
+// underlying filter fields content/shopify.js applies client-side (there's no
+// stable savedViewId we could reuse across merchants — see content/shopify.js
+// for why). The labels match the default saved-view tabs on Shopify's own
+// Orders page (All / Unfulfilled / Unpaid / Open / Archived).
+const SHOPIFY_ORDER_STATES = {
+  all:         { orderStatus: 'any',    financialStatus: 'any',     fulfillmentStatus: 'any' },
+  unfulfilled: { orderStatus: 'any',    financialStatus: 'any',     fulfillmentStatus: 'UNFULFILLED' },
+  unpaid:      { orderStatus: 'any',    financialStatus: 'PENDING', fulfillmentStatus: 'any' },
+  open:        { orderStatus: 'OPEN',   financialStatus: 'any',     fulfillmentStatus: 'any' },
+  archived:    { orderStatus: 'CLOSED', financialStatus: 'any',     fulfillmentStatus: 'any' },
+};
+
+function getShopifyFilters() {
+  const state = getEl('select-order-state-shopify')?.value || 'unfulfilled';
+  return SHOPIFY_ORDER_STATES[state] || SHOPIFY_ORDER_STATES.all;
+}
+
+// ─── Shopify Auto-Sync card ─────────────────────────────────────────────────
+// Same view/edit + Daily/Hourly pattern as Etsy's auto-sync card, but backed
+// by its own storage keys (shopify*) and its own alarm ("autoSyncShopify" in
+// background.js) so the two platforms can run on independent schedules.
+
+function bindShopifyAutoSyncCard() {
+  const toggleAutoSync = getEl("toggle-autosync-shopify");
+  if (!toggleAutoSync) return;
+
+  const btnSaveSync = getEl("btn-save-sync-shopify");
+  const optionsDiv = getEl("autosync-options-shopify");
+  const modeSelect = getEl("sync-mode-shopify");
+  const hoursInput = getEl("sync-hours-shopify");
+  const timeWrap = getEl("sync-time-wrap-shopify");
+  const hoursWrap = getEl("sync-hours-wrap-shopify");
+
+  const th = getEl("sync-time-h-shopify"), tm = getEl("sync-time-m-shopify");
+  const sh = getEl("sync-start-h-shopify"), sm = getEl("sync-start-m-shopify");
+
+  [th, sh].forEach(sel => {
+    sel.innerHTML = "";
+    for (let i = 0; i < 24; i++) {
+      const opt = document.createElement("option");
+      const val = i.toString();
+      opt.value = val;
+      opt.textContent = i.toString().padStart(2, "0");
+      sel.appendChild(opt);
+    }
+  });
+
+  [tm, sm].forEach(sel => {
+    sel.innerHTML = "";
+    for (let i = 0; i < 60; i++) {
+      const opt = document.createElement("option");
+      const val = i.toString().padStart(2, "0");
+      opt.value = val;
+      opt.textContent = val;
+      sel.appendChild(opt);
+    }
+  });
+
+  const to24h = (h, m) => `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  const from24h = (str24) => {
+    if (!str24) return { h: "0", m: "00" };
+    const [hh, mm] = str24.split(":");
+    return { h: parseInt(hh, 10).toString(), m: mm };
+  };
+
+  let lastSavedShopifySync = {};
+
+  const displayWrapper = getEl("autosync-display-shopify");
+  const editorWrapper = getEl("autosync-editor-shopify");
+
+  const openEditor = () => {
+    if (displayWrapper) displayWrapper.style.display = "none";
+    if (editorWrapper) editorWrapper.style.display = "flex";
+  };
+  const closeEditor = () => {
+    if (editorWrapper) editorWrapper.style.display = "none";
+    if (displayWrapper) displayWrapper.style.display = "flex";
+  };
+
+  const btnEditSync = getEl("btn-edit-sync-shopify");
+  if (btnEditSync) btnEditSync.addEventListener("click", openEditor);
+
+  const btnCancelSync = getEl("btn-cancel-sync-shopify");
+  if (btnCancelSync) {
+    btnCancelSync.addEventListener("click", () => {
+      toggleAutoSync.checked = lastSavedShopifySync.autoSyncEnabled === true;
+      modeSelect.value = lastSavedShopifySync.syncMode || "daily";
+      hoursInput.value = lastSavedShopifySync.syncHours || "4";
+
+      const tTime = from24h(lastSavedShopifySync.syncTime || "00:00");
+      th.value = tTime.h; tm.value = tTime.m;
+
+      const sTime = from24h(lastSavedShopifySync.syncStartTime || "00:00");
+      sh.value = sTime.h; sm.value = sTime.m;
+
+      updateSyncUI();
+      closeEditor();
+    });
+  }
+
+  storage.get(["shopifyAutoSyncEnabled", "shopifySyncMode", "shopifySyncTime", "shopifySyncHours", "shopifySyncStartTime"]).then((res) => {
+    toggleAutoSync.checked = res.shopifyAutoSyncEnabled === true;
+    modeSelect.value = res.shopifySyncMode || "daily";
+    hoursInput.value = res.shopifySyncHours || "4";
+
+    const tTime = from24h(res.shopifySyncTime || "00:00");
+    th.value = tTime.h; tm.value = tTime.m;
+
+    const sTime = from24h(res.shopifySyncStartTime || "00:00");
+    sh.value = sTime.h; sm.value = sTime.m;
+
+    updateLastSaved();
+    updateSyncUI();
+  });
+
+  function updateLastSaved() {
+    lastSavedShopifySync = {
+      autoSyncEnabled: toggleAutoSync.checked,
+      syncMode: modeSelect.value,
+      syncTime: to24h(th.value, tm.value),
+      syncHours: hoursInput.value,
+      syncStartTime: to24h(sh.value, sm.value),
+    };
+    checkChanges();
+  }
+
+  function checkChanges() {
+    const current = {
+      autoSyncEnabled: toggleAutoSync.checked,
+      syncMode: modeSelect.value,
+      syncTime: to24h(th.value, tm.value),
+      syncHours: hoursInput.value,
+      syncStartTime: to24h(sh.value, sm.value),
+    };
+    const hasChanged = JSON.stringify(current) !== JSON.stringify(lastSavedShopifySync);
+    btnSaveSync.disabled = !hasChanged;
+  }
+
+  function updateSyncUI() {
+    const isEnabled = toggleAutoSync.checked;
+    btnSaveSync.style.display = "block";
+    if (optionsDiv) optionsDiv.style.display = isEnabled ? "block" : "none";
+
+    const card = getEl("sync-card-shopify");
+    if (card) {
+      if (isEnabled) card.classList.add("active");
+      else card.classList.remove("active");
+    }
+
+    if (modeSelect.value === "daily") {
+      timeWrap.style.display = "flex";
+      hoursWrap.style.display = "none";
+    } else {
+      timeWrap.style.display = "none";
+      hoursWrap.style.display = "flex";
+    }
+
+    const displaySummary = getEl("autosync-summary-shopify");
+    if (displaySummary) {
+      if (!isEnabled) {
+        displaySummary.textContent = "OFF";
+      } else if (modeSelect.value === "daily") {
+        displaySummary.textContent = `ON (Daily at ${to24h(th.value, tm.value)})`;
+      } else {
+        displaySummary.textContent = `ON (Every ${hoursInput.value} hours from ${to24h(sh.value, sm.value)})`;
+      }
+    }
+
+    checkChanges();
+  }
+
+  function saveSyncConfig() {
+    const current = {
+      autoSyncEnabled: toggleAutoSync.checked,
+      syncMode: modeSelect.value,
+      syncTime: to24h(th.value, tm.value),
+      syncHours: hoursInput.value,
+      syncStartTime: to24h(sh.value, sm.value),
+    };
+
+    return storage.set({
+      shopifyAutoSyncEnabled: current.autoSyncEnabled,
+      shopifySyncMode: current.syncMode,
+      shopifySyncTime: current.syncTime,
+      shopifySyncHours: parseInt(current.syncHours, 10) || 4,
+      shopifySyncStartTime: current.syncStartTime,
+    }).then(() => {
+      lastSavedShopifySync = { ...current };
+      chrome.runtime.sendMessage({ type: "UPDATE_ALARM" }).catch(() => {});
+    });
+  }
+
+  [toggleAutoSync, modeSelect, hoursInput, th, tm, sh, sm].forEach(el => {
+    el.addEventListener("change", () => {
+      updateSyncUI();
+      checkChanges();
+
+      if (el === toggleAutoSync) {
+        storage.set({ shopifyAutoSyncEnabled: toggleAutoSync.checked }).then(() => {
+          chrome.runtime.sendMessage({ type: "UPDATE_ALARM" }).catch(() => {});
+        });
+      }
+    });
+  });
+
+  hoursInput.addEventListener("input", checkChanges);
+
+  btnSaveSync.addEventListener("click", () => {
+    btnSaveSync.disabled = true;
+    btnSaveSync.textContent = "Saving...";
+    saveSyncConfig().then(() => {
+      setTimeout(() => {
+        btnSaveSync.innerHTML = "<span>💾</span> Save Settings";
+        checkChanges();
+        closeEditor();
+      }, 800);
+      setStatus("success", "✅", "Shopify Auto-Sync configuration saved successfully.", true);
+    });
+  });
+}
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
@@ -35,7 +355,7 @@ async function checkAuth() {
   showView("main");
   const { apiToken, orgName } = await storage.get(["apiToken", "orgName"]);
   updateConfigState(apiToken, orgName);
-  loadMainPrefs();
+  applyPlatformUI();
   forceDetectShopInfo(true);
 }
 
@@ -310,6 +630,32 @@ async function addSystemLog(type, message) {
 // ─── Main prefs ───────────────────────────────────────────────────────────────
 
 async function loadMainPrefs() {
+  getEl("input-store").value = "";
+  getEl("input-shopid").value = "";
+
+  if (selectedPlatform === "shopify") {
+    const { shopifyStoreName, shopifyHandle, shopifyOrderState } = await storage.get([
+      "shopifyStoreName", "shopifyHandle", "shopifyOrderState",
+    ]);
+    // input-store always mirrors the store detected in the browser (like Etsy) —
+    // the Sellfern mapping is a separate concept, held by the dropdown below.
+    if (shopifyHandle) {
+      getEl("input-store").value = shopifyHandle;
+      getEl("input-shopid").value = shopifyHandle;
+    }
+    if (shopifyStoreName) {
+      isStoreRegistered(shopifyStoreName).then(registered => {
+        updateStoreWarningUI(shopifyStoreName, registered);
+      });
+    } else {
+      updateStoreWarningUI("", false);
+    }
+
+    const stateSelect = getEl("select-order-state-shopify");
+    if (stateSelect) stateSelect.value = shopifyOrderState || "unfulfilled";
+    return;
+  }
+
   const { defaultStore, shopId, orderStates, completedTimeframe } = await storage.get([
     "defaultStore",
     "shopId",
@@ -375,11 +721,15 @@ function updateStoreWarningUI(storeName, registered) {
   const warningStoreName = document.getElementById("warning-store-name");
   const hasStore = Boolean(storeName);
 
+  const noStoreHint = selectedPlatform === "shopify"
+    ? "Please open your Shopify Admin, click Auto Detect, then map it to a Sellfern store below."
+    : "Please open Etsy and click Auto Detect to get store information.";
+
   if (warningIcon) {
     warningIcon.style.display = (hasStore && registered) ? "none" : "inline";
     warningIcon.title = hasStore
       ? `WARNING: Store "${storeName}" is NOT found in Sellfern. Please add it first!`
-      : "Please open Etsy and click Auto Detect to get store information.";
+      : noStoreHint;
   }
   if (btnRecheck) {
     btnRecheck.style.display = (!hasStore || registered) ? "none" : "inline";
@@ -392,7 +742,7 @@ function updateStoreWarningUI(storeName, registered) {
     if (warningMessage) {
       warningMessage.textContent = hasStore
         ? `🚨 WARNING: Store "${storeName}" is NOT found in Sellfern. Please add it first!`
-        : "🚨 Open Etsy and click Auto Detect before fetching orders.";
+        : `🚨 ${noStoreHint}`;
     }
     if (warningStoreName) warningStoreName.textContent = storeName;
   }
@@ -416,7 +766,7 @@ async function isStoreRegistered(storeName) {
     if (!res.ok) return true; // If API fails, allow to avoid blocking
     const response = await res.json();
     const stores = response.success ? response.data : response;
-    return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");
+    return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === selectedPlatform);
   } catch (e) {
     console.error("Failed to check store existence:", e);
     return true; // Allow if network fails
@@ -426,15 +776,58 @@ async function isStoreRegistered(storeName) {
 async function forceDetectShopInfo(silent = false) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url?.includes("etsy.com")) {
-      if (!silent) setStatus("error", "❌", "Please navigate to Etsy to detect shop info.", true);
+    const needle = selectedPlatform === "shopify" ? "admin.shopify.com" : "etsy.com";
+    if (!tab?.url?.includes(needle)) {
+      if (!silent) {
+        const msg = selectedPlatform === "shopify"
+          ? "Please navigate to your Shopify Admin to detect shop info."
+          : "Please navigate to Etsy to detect shop info.";
+        setStatus("error", "❌", msg, true);
+      }
       return;
     }
 
-    // Reuse the detection logic by calling autoDetectShopIdActiveTab or similar
-    await autoDetectShopIdActiveTab();
+    if (selectedPlatform === "shopify") {
+      await autoDetectShopifyHandleActiveTab();
+    } else {
+      await autoDetectShopIdActiveTab();
+    }
   } catch (err) {
     if (!silent) setStatus("error", "❌", "Failed to detect shop info.", true);
+  }
+}
+
+// Shopify: detect the store handle directly from the admin.shopify.com URL
+// (…/store/<handle>/…) and show it in the Store Info box, same as Etsy does.
+// This is just the technical identifier used to call the Shopify internal
+// API — it's NOT assumed to be the store's display name in Sellfern, so the
+// merchant still maps the two explicitly via the dropdown below.
+async function autoDetectShopifyHandleActiveTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const m = tab?.url?.match(/\/store\/([^/]+)\//);
+    if (!m) {
+      setStatus("error", "❌", "Could not detect Shopify store handle from this URL.", true);
+      return;
+    }
+    const handle = m[1];
+    getEl("input-shopid").value = handle;
+    getEl("input-store").value = handle;
+    await storage.set({ shopifyHandle: handle });
+
+    const { shopifyStoreName } = await storage.get(["shopifyStoreName"]);
+    if (shopifyStoreName) {
+      const registered = await isStoreRegistered(shopifyStoreName);
+      updateStoreWarningUI(shopifyStoreName, registered);
+      renderShopifyMapViewMode(shopifyStoreName);
+      setStatus("info", "🔍", "Open the Orders page, let it finish loading, then click Fetch Orders.");
+    } else {
+      updateStoreWarningUI("", false);
+      await openShopifyMapEditMode();
+      setStatus("info", "🔍", `Detected "${handle}". Please select the matching store in Sellfern below.`);
+    }
+  } catch (err) {
+    setStatus("error", "❌", "Failed to detect Shopify store handle.", true);
   }
 }
 
@@ -615,7 +1008,11 @@ function bindMainEvents() {
   const btnRecheck = getEl("btn-recheck-store");
   if (btnRecheck) {
     btnRecheck.addEventListener("click", async () => {
-      const storeName = getEl("input-store").value.trim();
+      // For Shopify, input-store shows the browser-detected handle, not the
+      // mapped Sellfern store name — read the actual mapping from storage.
+      const storeName = selectedPlatform === "shopify"
+        ? (await storage.get(["shopifyStoreName"])).shopifyStoreName || ""
+        : getEl("input-store").value.trim();
       if (!storeName) return;
       btnRecheck.textContent = "Checking...";
       btnRecheck.disabled = true;
@@ -655,20 +1052,67 @@ function bindMainEvents() {
 
   // Persist shop ID
   getEl("input-shopid").addEventListener("change", () => {
-    storage.set({ shopId: getEl("input-shopid").value.trim() });
+    storage.set({ [shopIdKey()]: getEl("input-shopid").value.trim() });
   });
   getEl("input-store").addEventListener("change", async () => {
     const storeName = getEl("input-store").value.trim();
-    storage.set({ defaultStore: storeName });
+    storage.set({ [storeKey()]: storeName });
     if (storeName) {
       const registered = await isStoreRegistered(storeName);
       updateStoreWarningUI(storeName, registered);
-      
-      setStatus("info", "🔍", "Navigate to any Etsy page, then click Fetch Orders.");
+
+      setStatus("info", "🔍", defaultHint());
     } else {
       updateStoreWarningUI("", false);
     }
   });
+
+  // Shopify: map the browser-detected store to a store registered in Sellfern.
+  // Same view/edit + explicit Save pattern as the API Token settings above.
+  const selectShopifyStore = getEl("select-shopify-store");
+  const btnSaveShopifyMap = getEl("btn-save-shopify-map");
+  const btnCancelShopifyMap = getEl("btn-cancel-shopify-map");
+  const btnEditShopifyMap = getEl("btn-edit-shopify-map");
+
+  if (selectShopifyStore) {
+    selectShopifyStore.addEventListener("change", () => {
+      if (btnSaveShopifyMap) btnSaveShopifyMap.disabled = !selectShopifyStore.value;
+    });
+  }
+
+  if (btnSaveShopifyMap) {
+    btnSaveShopifyMap.addEventListener("click", async () => {
+      const name = selectShopifyStore.value;
+      if (!name) return;
+      await storage.set({ shopifyStoreName: name });
+      updateStoreWarningUI(name, true); // guaranteed registered — came from the Sellfern store list itself
+      renderShopifyMapViewMode(name);
+      setStatus("success", "✅", `Mapped to store "${name}".`, true);
+    });
+  }
+
+  if (btnCancelShopifyMap) {
+    btnCancelShopifyMap.addEventListener("click", async () => {
+      const { shopifyStoreName } = await storage.get(["shopifyStoreName"]);
+      renderShopifyMapViewMode(shopifyStoreName);
+    });
+  }
+
+  if (btnEditShopifyMap) {
+    btnEditShopifyMap.addEventListener("click", () => openShopifyMapEditMode());
+  }
+
+  const btnRefreshShopifyStores = getEl("btn-refresh-shopify-stores");
+  if (btnRefreshShopifyStores) {
+    btnRefreshShopifyStores.addEventListener("click", () => loadShopifyStoreOptions());
+  }
+
+  const selectOrderStateShopify = getEl("select-order-state-shopify");
+  if (selectOrderStateShopify) {
+    selectOrderStateShopify.addEventListener("change", (e) => {
+      storage.set({ shopifyOrderState: e.target.value });
+    });
+  }
 
   getEl("select-order-state").addEventListener("change", (e) => {
     storage.set({ orderStateId: e.target.value });
@@ -902,13 +1346,19 @@ function bindMainEvents() {
     });
   }
 
+  bindShopifyAutoSyncCard();
+
   // Platform tabs
-  document.querySelectorAll(".platform-tab:not(.disabled)").forEach((tab) => {
+  document.querySelectorAll(".platform-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
+      if (tab.classList.contains("active")) return;
       document
         .querySelectorAll(".platform-tab")
         .forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
+      selectedPlatform = tab.dataset.platform;
+      clearPreview();
+      applyPlatformUI();
     });
   });
 
@@ -977,6 +1427,11 @@ async function onScrape() {
   const { apiToken } = await storage.get(["apiToken"]);
   if (!apiToken) {
     setStatus("error", "⚙️", "API Token not configured. Open Settings to enter your token before fetching orders.", true);
+    return;
+  }
+
+  if (selectedPlatform === "shopify") {
+    await onScrapeShopify();
     return;
   }
 
@@ -1067,6 +1522,83 @@ async function onScrape() {
   }
 }
 
+async function onScrapeShopify() {
+  setStatus("loading", "⏳", "Reading orders from Shopify…");
+  getEl("btn-scrape").disabled = true;
+  showProgress('scrape');
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab?.url?.includes("admin.shopify.com")) {
+      setStatus("error", "❌", "Please navigate to your Shopify Orders page first.", true);
+      return;
+    }
+
+    const shopHandle = getEl("input-shopid").value.trim();
+    // Read the saved mapping from storage, not the <select> element — that
+    // element is only populated while the "Map to Sellfern Store" card is in
+    // Edit mode, so it's empty whenever the popup opens straight into View
+    // mode (the normal case once a mapping has already been saved).
+    const { shopifyStoreName } = await storage.get(["shopifyStoreName"]);
+    const storeName = (shopifyStoreName || "").trim();
+
+    if (!shopHandle) {
+      setStatus("error", "❌", "Please click Auto Detect on your Shopify Orders page first.", true);
+      return;
+    }
+
+    if (!storeName) {
+      setStatus("error", "❌", "Please map this store to a Sellfern store first (see \"Map to Sellfern Store\" above).", true);
+      return;
+    }
+
+    const registered = await isStoreRegistered(storeName);
+    if (!registered) {
+      const errMsg = `Store "${storeName}" is not in this organization. Please contact your admin to add this store before pushing to Sellfern.`;
+      setStatus("error", "❌", errMsg, true);
+      addSystemLog("error", `[Manual Scrape] ` + errMsg);
+      return;
+    }
+
+    const filters = getShopifyFilters();
+
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "SCRAPE_SHOPIFY_ORDERS",
+      shopHandle,
+      storeName,
+      filters,
+    });
+
+    if (!response?.ok) throw new Error(response?.error || "Scrape failed");
+
+    scrapedOrders = response.orders;
+
+    if (scrapedOrders.length === 0) {
+      setStatus("error", "⚠️", "No orders found for this shop.", true);
+      addSystemLog("info", `[Scrape] Fetched 0 Shopify orders`);
+      return;
+    }
+
+    renderPreview(scrapedOrders);
+    setStatus("success", "✅", `${scrapedOrders.length} orders fetched.`, true);
+    addSystemLog("info", `[Scrape] Successfully fetched ${scrapedOrders.length} Shopify orders`);
+    getEl("btn-push").disabled = false;
+  } catch (err) {
+    let hint = "";
+    if (/No live Shopify order query captured/.test(err.message)) {
+      hint = " Please reload the Orders page and try again.";
+    } else if (/Could not establish connection/.test(err.message)) {
+      hint = " The content script isn't loaded on this tab (this happens after the extension is reloaded) — please reload the Shopify tab and try again.";
+    }
+    setStatus("error", "❌", `Error: ${err.message}${hint}`, true);
+    addSystemLog("error", `[Manual Scrape] Shopify scrape error: ${err.message}`);
+  } finally {
+    getEl("btn-scrape").disabled = false;
+    hideProgress();
+  }
+}
+
 // ─── Push ─────────────────────────────────────────────────────────────────────
 
 async function onPush() {
@@ -1138,17 +1670,19 @@ function renderPreview(orders) {
   getEl("preview-section").style.display = "flex";
 }
 
+function defaultHint() {
+  return selectedPlatform === "shopify"
+    ? "Navigate to your Shopify Orders page, then click Fetch Orders."
+    : "Navigate to any Etsy page, then click Fetch Orders.";
+}
+
 function clearPreview() {
   const tbody = getEl("preview-body");
   if (tbody) tbody.innerHTML = "";
   const sec = getEl("preview-section");
   if (sec) sec.style.display = "none";
   getEl("btn-push").disabled = true;
-  setStatus(
-    "info",
-    "🔍",
-    "Navigate to any Etsy page, then click Fetch Orders.",
-  );
+  setStatus("info", "🔍", defaultHint());
 }
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────
@@ -1168,7 +1702,7 @@ function setStatus(type, icon, text, autoClear = false) {
   
   if (autoClear) {
     statusTimeout = setTimeout(() => {
-      setStatus("info", "🔍", "Navigate to any Etsy page, then click Fetch Orders.");
+      setStatus("info", "🔍", defaultHint());
     }, 3000);
   }
 }

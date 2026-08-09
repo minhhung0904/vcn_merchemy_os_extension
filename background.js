@@ -5,6 +5,15 @@ import { DEFAULT_API_URL } from './config.js';
 
 let cancelPushFlag = false;
 
+// Mirrors SHOPIFY_ORDER_STATES in popup/popup.js — keep both in sync.
+const SHOPIFY_ORDER_STATES = {
+  all:         { orderStatus: 'any',    financialStatus: 'any',     fulfillmentStatus: 'any' },
+  unfulfilled: { orderStatus: 'any',    financialStatus: 'any',     fulfillmentStatus: 'UNFULFILLED' },
+  unpaid:      { orderStatus: 'any',    financialStatus: 'PENDING', fulfillmentStatus: 'any' },
+  open:        { orderStatus: 'OPEN',   financialStatus: 'any',     fulfillmentStatus: 'any' },
+  archived:    { orderStatus: 'CLOSED', financialStatus: 'any',     fulfillmentStatus: 'any' },
+};
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CANCEL_PUSH") {
     cancelPushFlag = true;
@@ -14,6 +23,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "UPDATE_ALARM") {
     setupSyncAlarm();
+    setupShopifySyncAlarm();
     sendResponse({ ok: true });
     return true;
   }
@@ -50,8 +60,9 @@ async function handlePushOrders(orders) {
   if (!orders?.length) throw new Error("No orders to push.");
 
   const storeName = defaultStore || orders[0]?.storeName;
+  const platform = orders[0]?.platform || 'etsy';
   if (storeName) {
-    const isRegistered = await checkStoreRegistered(storeName, apiToken);
+    const isRegistered = await checkStoreRegistered(storeName, apiToken, platform);
     if (!isRegistered) {
       throw new Error(`Store "${storeName}" is not in this organization. Please contact your admin to add this store before pushing to Sellfern.`);
     }
@@ -111,7 +122,7 @@ async function addSystemLog(type, message) {
   await new Promise((res) => chrome.storage.local.set({ systemLogs }, res));
 }
 
-async function checkStoreRegistered(storeName, apiToken) {
+async function checkStoreRegistered(storeName, apiToken, platform = "etsy") {
   if (!storeName) return true;
   try {
     const url = DEFAULT_API_URL + "/stores";
@@ -126,7 +137,7 @@ async function checkStoreRegistered(storeName, apiToken) {
     if (!res.ok) return true; // Ignore validation if API is unreachable
     const response = await res.json();
     const stores = response.success ? response.data : response;
-    return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === "etsy");
+    return stores.some(s => s.name?.toLowerCase() === storeName.toLowerCase() && s.platform?.toLowerCase() === platform.toLowerCase());
   } catch (e) {
     return true; // Ignore if network disconnects
   }
@@ -136,10 +147,12 @@ async function checkStoreRegistered(storeName, apiToken) {
 
 chrome.runtime.onInstalled.addListener(() => {
   setupSyncAlarm();
+  setupShopifySyncAlarm();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   setupSyncAlarm();
+  setupShopifySyncAlarm();
 });
 
 async function setupSyncAlarm() {
@@ -189,6 +202,55 @@ async function setupSyncAlarm() {
       periodInMinutes: 1440 // 24 hours
     });
     console.log(`[Auto-Sync] Created daily alarm for ${nextRun.toLocaleString()} (${timeStr})`);
+  }
+}
+
+async function setupShopifySyncAlarm() {
+  const { shopifyAutoSyncEnabled, shopifySyncMode, shopifySyncTime, shopifySyncHours, shopifySyncStartTime } =
+    await new Promise((res) => chrome.storage.local.get(
+      ["shopifyAutoSyncEnabled", "shopifySyncMode", "shopifySyncTime", "shopifySyncHours", "shopifySyncStartTime"], res
+    ));
+
+  await chrome.alarms.clear("autoSyncShopify");
+
+  if (shopifyAutoSyncEnabled !== true) {
+    console.log("[Auto-Sync] Shopify: disabled by user.");
+    return;
+  }
+
+  const mode = shopifySyncMode || "daily";
+
+  if (mode === "hourly") {
+    const hours = parseInt(shopifySyncHours || 4, 10);
+    const startStr = shopifySyncStartTime || "00:00";
+    const [hh, mm] = startStr.split(":").map(Number);
+    const now = new Date();
+
+    let nextRun = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    while (nextRun.getTime() <= now.getTime()) {
+      nextRun.setTime(nextRun.getTime() + hours * 60 * 60 * 1000);
+    }
+
+    chrome.alarms.create("autoSyncShopify", {
+      when: nextRun.getTime(),
+      periodInMinutes: hours * 60
+    });
+    console.log(`[Auto-Sync] Shopify: created periodic alarm for every ${hours} hours starting at ${nextRun.toLocaleString()}.`);
+  } else {
+    const timeStr = shopifySyncTime || "00:00";
+    const [hh, mm] = timeStr.split(":").map(Number);
+    const now = new Date();
+
+    let nextRun = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    if (nextRun.getTime() <= now.getTime()) {
+      nextRun.setDate(nextRun.getDate() + 1);
+    }
+
+    chrome.alarms.create("autoSyncShopify", {
+      when: nextRun.getTime(),
+      periodInMinutes: 1440
+    });
+    console.log(`[Auto-Sync] Shopify: created daily alarm for ${nextRun.toLocaleString()} (${timeStr})`);
   }
 }
 
@@ -333,7 +395,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
             }
           }
         } catch(e) {
-          console.error("[Auto-Sync] Lỗi khi detect thông tin:", e);
+          console.error("[Auto-Sync] Error while detecting shop info:", e);
         }
 
         if (!shopId || !targetOrderStateId) {
@@ -382,6 +444,105 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     } catch (err) {
       console.error("[Auto-Sync] Error during background sync:", err);
       await addSystemLog("error", err.message || "Unknown error during auto fetch and push.");
+    }
+  }
+
+  if (alarm.name === "autoSyncShopify") {
+    console.log("[Auto-Sync] Firing Shopify sync alarm...");
+    const { shopifyHandle, shopifyStoreName, shopifyAutoSyncEnabled, shopifyOrderState } = await new Promise((res) =>
+      chrome.storage.local.get(
+        ["shopifyHandle", "shopifyStoreName", "shopifyAutoSyncEnabled", "shopifyOrderState"], res
+      )
+    );
+
+    if (shopifyAutoSyncEnabled !== true) {
+      console.log("[Auto-Sync] Shopify: aborted, disabled by user.");
+      return;
+    }
+
+    if (!shopifyHandle || !shopifyStoreName) {
+      console.log("[Auto-Sync] Shopify: missing store handle or Sellfern store mapping.");
+      await addSystemLog("error", "[Auto-Sync] Shopify: missing store handle or Sellfern store mapping. Please configure it in the popup first.");
+      return;
+    }
+
+    try {
+      const ordersUrl = `https://admin.shopify.com/store/${shopifyHandle}/orders`;
+
+      // 1. Find an existing tab for this Shopify store, or open one in the background.
+      let [tab] = await chrome.tabs.query({ url: `https://admin.shopify.com/store/${shopifyHandle}/*` });
+      let tabCreated = false;
+      let needsLoadWait = false;
+
+      if (!tab) {
+        console.log("[Auto-Sync] Shopify: no open tab found for this store. Opening a background tab...");
+        tab = await chrome.tabs.create({ url: ordersUrl, active: false });
+        tabCreated = true;
+        needsLoadWait = true;
+      } else if (!/\/orders(\?|$)/.test(tab.url || "")) {
+        console.log("[Auto-Sync] Shopify: existing tab isn't on the Orders page, navigating it there...");
+        await chrome.tabs.update(tab.id, { url: ordersUrl });
+        needsLoadWait = true;
+      }
+
+      if (needsLoadWait) {
+        await new Promise((resolve) => {
+          const listener = (tabId, info) => {
+            if (tabId === tab.id && info.status === "complete") {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+        });
+        // Give the React SPA time to hydrate and fire its own OrderListData
+        // query — that's what our content script needs to capture before it
+        // can fetch/paginate on its own.
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+
+      console.log(`[Auto-Sync] Shopify: using tab ${tab.id} for scraping...`);
+
+      // 2. Ask the content script to scrape using whatever it has captured.
+      const filters = SHOPIFY_ORDER_STATES[shopifyOrderState] || SHOPIFY_ORDER_STATES.unfulfilled;
+      const response = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(tab.id, {
+          type: "SCRAPE_SHOPIFY_ORDERS",
+          shopHandle: shopifyHandle,
+          storeName: shopifyStoreName,
+          filters,
+        }, (res) => {
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message });
+          } else {
+            resolve(res);
+          }
+        });
+      });
+
+      // 3. Cleanup if we created the tab
+      if (tabCreated) {
+        chrome.tabs.remove(tab.id);
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(response?.error || "[Auto-Sync] Shopify scrape failed in content script.");
+      }
+
+      const orders = response.orders || [];
+      console.log(`[Auto-Sync] Shopify: successfully scraped ${orders.length} orders. Pushing...`);
+
+      if (orders.length > 0) {
+        const result = await handlePushOrders(orders);
+        console.log(`[Auto-Sync] Shopify: successfully pushed ${result.pushed} orders to Sellfern.`);
+        await addSystemLog("success", `[Auto-Sync] Shopify: successfully fetched and pushed ${result.pushed} orders.`);
+      } else {
+        console.log("[Auto-Sync] Shopify: no orders found.");
+        await addSystemLog("info", "[Auto-Sync] Shopify: no orders found.");
+      }
+    } catch (err) {
+      console.error("[Auto-Sync] Error during Shopify background sync:", err);
+      await addSystemLog("error", `[Auto-Sync] Shopify: ${err.message || "Unknown error during auto fetch and push."}`);
     }
   }
 });

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sellfern - Etsy</title>
+  <title>Sellfern - Order Sync</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
@@ -44,20 +44,23 @@
       <label class="label">Platform</label>
       <div class="platform-tabs">
         <button class="platform-tab active" data-platform="etsy">Etsy</button>
-        <button class="platform-tab disabled" data-platform="other" title="Coming soon">Other Platforms <br> Coming soon...</button>
+        <button class="platform-tab" data-platform="shopify">Shopify</button>
       </div>
     </section>
-    
+
     <!-- Store Name + Shop ID -->
     <section class="section">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <label class="label" style="margin-bottom: 0; display: flex; align-items: center; gap: 4px;">
-          Etsy Store Info
+        <label class="label" id="store-info-label" style="margin-bottom: 0; display: flex; align-items: center; gap: 4px;">
+          <span id="store-info-text">Etsy Store Info</span>
           <span id="store-warning-icon" style="display: none; cursor: default; font-size: 14px;"           title="Store not found in Sellfern">⚠️</span>
           <button id="btn-recheck-store" class="btn-link" style="display: none; font-size: 11px; padding: 0; color: #ff9800; margin-left: 4px;">Re-check</button>
         </label>
         <button id="btn-detect-shop" class="btn-link" style="font-size: 12px; padding: 0;">Auto Detect</button>
       </div>
+      <p id="shopify-hint" class="hint" style="display:none; margin: -4px 0 8px;">
+        Open <code>admin.shopify.com/store/&lt;handle&gt;/orders</code>, let the page finish loading orders, then click Auto Detect.
+      </p>
       <div id="store-warning-text" style="display: none; color: #ff6b6b; font-size: 11px; margin-top: 8px; padding: 6px; background: rgba(255, 107, 107, 0.1); border-radius: 4px; border: 1px solid rgba(255, 107, 107, 0.2);">
         <span id="store-warning-message">🚨 WARNING: Store "<span id="warning-store-name"></span>" is NOT found in Sellfern. Please add it first!</span>
       </div>
@@ -65,10 +68,34 @@
         <input type="text" id="input-store" class="input" placeholder="Store Name" title="Store Name" readonly />
         <input type="hidden" id="input-shopid" />
       </div>
+
+      <div id="shopify-store-map" style="display:none; margin-top: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label class="label" style="margin-bottom: 0;">Map to Sellfern Store</label>
+          <button id="btn-refresh-shopify-stores" class="btn-link" style="font-size: 11px; padding: 0;">Refresh list</button>
+        </div>
+
+        <!-- View mode: shows the currently saved mapping -->
+        <div id="shopify-map-view" style="display:none; align-items: center; justify-content: space-between; gap: 8px;">
+          <span id="shopify-map-view-name" class="input" style="flex:1; display:flex; align-items:center;">— no store mapped yet —</span>
+          <button id="btn-edit-shopify-map" class="btn-link" style="font-size: 12px; padding: 0 4px; white-space: nowrap;">Edit</button>
+        </div>
+
+        <!-- Edit mode: dropdown + save/cancel -->
+        <div id="shopify-map-edit" style="display:none; flex-direction: column; gap: 8px;">
+          <select id="select-shopify-store" class="input">
+            <option value="">-- Select a Sellfern store --</option>
+          </select>
+          <div style="display:flex; gap:8px;">
+            <button id="btn-cancel-shopify-map" class="btn btn-secondary" style="flex:1; padding:7px;">Cancel</button>
+            <button id="btn-save-shopify-map" class="btn btn-primary" style="flex:1; padding:7px;" disabled>Save</button>
+          </div>
+        </div>
+      </div>
     </section>
     
     <!-- Auto Sync Settings -->
-    <section class="section">
+    <section class="section" id="section-autosync">
       <div id="sync-card" class="sync-card active">
         <!-- Display Mode -->
         <div id="autosync-display" style="display: flex; justify-content: space-between; align-items: center; padding: 4px;">
@@ -137,8 +164,78 @@
       </div>
     </section>
 
+    <!-- Auto Sync Settings (Shopify) -->
+    <section class="section" id="section-autosync-shopify" style="display:none;">
+      <div id="sync-card-shopify" class="sync-card active">
+        <!-- Display Mode -->
+        <div id="autosync-display-shopify" style="display: flex; justify-content: space-between; align-items: center; padding: 4px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+             <div class="sync-title" style="margin: 0;"><span>🔄</span> Auto-Sync</div>
+             <div id="autosync-summary-shopify" style="font-size: 12px; color: var(--muted);">OFF</div>
+          </div>
+          <button id="btn-edit-sync-shopify" class="btn-link" style="font-size: 13px; margin: 0; padding: 4px 8px;">Edit</button>
+        </div>
+
+        <!-- Editor Mode -->
+        <div id="autosync-editor-shopify" style="display: none; flex-direction: column; gap: 12px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 5px;">
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <span style="font-size: 14px; font-weight: 500;">Enable Auto-Sync</span>
+            <label class="switch">
+              <input type="checkbox" id="toggle-autosync-shopify">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="sync-options-inner" id="autosync-options-shopify" style="display: none;">
+            <!-- Frequency -->
+            <div class="option-row">
+              <label class="option-label" for="sync-mode-shopify">⚡ Frequency</label>
+              <select id="sync-mode-shopify" class="input">
+                <option value="daily">Daily</option>
+                <option value="hourly">Hourly</option>
+              </select>
+            </div>
+
+            <!-- Daily Time -->
+            <div id="sync-time-wrap-shopify" class="option-row" style="margin-top: 10px;">
+              <label class="option-label">🕒 Target Time</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <select id="sync-time-h-shopify" class="input" style="width: 70px;"></select>
+                <span style="color: var(--muted); font-weight: bold;">:</span>
+                <select id="sync-time-m-shopify" class="input" style="width: 70px;"></select>
+              </div>
+            </div>
+
+            <!-- Hourly Interval -->
+            <div id="sync-hours-wrap-shopify" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
+              <div class="option-row">
+                <label class="option-label" for="sync-hours-shopify">⏳ Interval (Hours)</label>
+                <input type="number" id="sync-hours-shopify" class="input" value="4" min="1" max="24" />
+              </div>
+              <div class="option-row">
+                <label class="option-label">🏁 Start Time</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <select id="sync-start-h-shopify" class="input" style="width: 70px;"></select>
+                  <span style="color: var(--muted); font-weight: bold;">:</span>
+                  <select id="sync-start-m-shopify" class="input" style="width: 70px;"></select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 10px; margin-top: 5px;">
+            <button id="btn-cancel-sync-shopify" class="btn btn-secondary btn-full" style="padding: 10px;">Cancel</button>
+            <button id="btn-save-sync-shopify" class="btn btn-primary btn-full" style="padding: 10px;" disabled>
+              <span>💾</span> Save Settings
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Manual Scrape Options -->
-    <section class="section">
+    <section class="section" id="section-order-state">
       <div class="field-group" style="margin-top: 10px;">
         <label class="label" for="select-order-state">Order State</label>
         <select id="select-order-state" class="input">
@@ -151,6 +248,20 @@
           <option value="last_30_days" selected>Last 30 days</option>
           <option value="last_90_days">Last 90 days</option>
           <option value="last_365_days">Last 365 days</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- Manual Scrape Options (Shopify) -->
+    <section class="section" id="section-order-state-shopify" style="display:none;">
+      <div class="field-group" style="margin-top: 10px;">
+        <label class="label" for="select-order-state-shopify">Order State</label>
+        <select id="select-order-state-shopify" class="input">
+          <option value="all">All</option>
+          <option value="unfulfilled" selected>Unfulfilled</option>
+          <option value="unpaid">Unpaid</option>
+          <option value="open">Open</option>
+          <option value="archived">Archived</option>
         </select>
       </div>
     </section>

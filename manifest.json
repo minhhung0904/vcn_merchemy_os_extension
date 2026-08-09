@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Sellfern - Etsy",
-  "version": "1.1.2",
+  "name": "Sellfern - Order Sync",
+  "version": "1.2.0",
   "description": "Sellfern extension",
 
   "permissions": [
@@ -15,7 +15,9 @@
   "host_permissions": [
     "https://www.etsy.com/*",
     "https://*.etsy.com/*",
-    "https://sellfern.com/*"
+    "https://admin.shopify.com/*",
+    "https://sellfern.com/*",
+    "https://*.sellfern.com/*"
   ],
 
   "background": {
@@ -45,6 +47,17 @@
       "matches": ["https://www.etsy.com/*"],
       "js": ["content/etsy.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://admin.shopify.com/*"],
+      "js": ["content/shopify-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://admin.shopify.com/*"],
+      "js": ["content/shopify.js"],
+      "run_at": "document_start"
     }
   ],
 

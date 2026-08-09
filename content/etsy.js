@@ -547,6 +547,7 @@
 
     return {
       id:              orderId,
+      platform:        'etsy',
       storeName:       storeName || '',
       date:            orderDate,
       items,
