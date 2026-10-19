@@ -27,21 +27,88 @@
   const capturedOrdersCache = new Map(); // orderId -> raw order object
   const capturedBuyersMap = {}; // buyer_id -> buyer object, merged across pages
 
+  const capturedPersonalizationFiles = new Map(); // orderId -> raw personalization-files response
+
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const data = event.data;
-    if (!data || !data.__sellfern || data.type !== 'ORDERS_DATA_PAGE') return;
+    if (!data || !data.__sellfern) return;
+
+    if (data.type === 'PERSONALIZATION_FILES') {
+      const { orderId, data: files } = data.payload || {};
+      if (orderId) capturedPersonalizationFiles.set(String(orderId), files);
+      return;
+    }
+    if (data.type !== 'ORDERS_DATA_PAGE') return;
 
     const { orders = [], buyers = [] } = data.payload || {};
-    buyers.forEach((b) => {
+    ingestOrders(orders, buyers);
+  });
+
+  function ingestOrders(orders, buyers) {
+    (buyers || []).forEach((b) => {
       const id = getV(b, 'buyer_id', 'buyerId');
       if (id) capturedBuyersMap[id] = b;
     });
-    orders.forEach((o) => {
+    (orders || []).forEach((o) => {
       const id = getOrderId(o);
       if (id) capturedOrdersCache.set(id, o);
     });
-  });
+  }
+
+  // The first page of orders is server-rendered into the HTML (confirmed live:
+  // the Completed page never fires mission-control/orders/data on load), so
+  // there is no request to capture. Read the embedded orders_search object
+  // straight from the page's own <script> tags instead — no network involved.
+  function extractJsonObjectAfter(text, keyIdx) {
+    const start = text.indexOf('{', text.indexOf(':', keyIdx));
+    if (start < 0) return null;
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) return text.slice(start, i + 1);
+    }
+    return null;
+  }
+
+  let embeddedScanned = false;
+  function ingestEmbeddedOrders() {
+    let found = 0;
+    for (const s of document.scripts) {
+      const text = s.textContent || '';
+      if (text.length < 200) continue;
+      const m = /["']?(orders_search|ordersSearch)["']?\s*:/.exec(text);
+      if (!m) continue;
+      const raw = extractJsonObjectAfter(text, m.index);
+      let search = null;
+      try { search = raw && JSON.parse(raw); } catch (_) {}
+      if (!search || !Array.isArray(search.orders)) {
+        console.log('[Sellfern][Flow] orders_search found in a <script> but not parseable as JSON. Context:',
+          s.id || s.type || '(no id)', text.slice(Math.max(0, m.index - 60), m.index + 160));
+        continue;
+      }
+      ingestOrders(search.orders, search.buyers);
+      found += search.orders.length;
+    }
+    if (!embeddedScanned || found) {
+      console.log('[Sellfern][Flow] embedded orders read from page scripts:', found);
+    }
+    embeddedScanned = true;
+    return found;
+  }
+
+  // Ask etsy-main.js (page world) to replay what it captured before this
+  // script finished loading.
+  const requestReplay = () => window.postMessage({ __sellfern_request: 'REPLAY' }, '*');
+  requestReplay();
 
   // ─── Get Shop (Business) ID ───────────────────────────────────────────────────
   // Etsy embeds the shop ID in multiple places on the page.
@@ -548,6 +615,8 @@
 
     // Map transactions → items
     const buyerNote = getV(notes, 'note_from_buyer', 'noteFromBuyer') || '';
+    const privateNotes = (getV(notes, 'private_order_notes', 'privateOrderNotes') || [])
+      .map(n => n.note).filter(Boolean);
     const txs = getV(etsyOrder, 'transactions', 'transactions') || [];
     const items = txs.map(tx =>
       mapTransaction(tx, {
@@ -576,6 +645,8 @@
       storeName:       storeName || '',
       date:            orderDate,
       items,
+      buyerNote,
+      privateNotes,
 
       // Financials
       totalAmount,
@@ -611,11 +682,51 @@
 
   // ─── Map Transaction → Sellfern OrderItem ────────────────────────────────────
 
+  // Image shape isn't confirmed — read defensively from the likely locations.
+  function pickImageUrl(v) {
+    if (!v) return '';
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) return pickImageUrl(v[0]);
+    return v.url_570xN || v.url_fullxfull || v.url_340x270 || v.url_170x135 || v.url_75x75 ||
+      v.url || v.src || v.image_url || v.imageUrl || '';
+  }
+
+  function getItemImage(tx, product) {
+    // Etsy only exposes a 75x75 thumbnail here; the same path serves larger sizes.
+    const thumb = getV(product, 'image_url_75x75', 'imageUrl75x75');
+    if (thumb) return String(thumb).replace('/il_75x75.', '/il_fullxfull.');
+
+    const candidates = [
+      getV(product, 'image_url', 'imageUrl'), product.image, product.images,
+      getV(product, 'listing_image', 'listingImage'),
+      getV(tx, 'image_url', 'imageUrl'), tx.image, tx.images,
+      getV(tx, 'listing_image', 'listingImage'),
+      getV(tx, 'image_urls', 'imageUrls'),
+    ];
+    for (const c of candidates) {
+      const url = pickImageUrl(c);
+      if (url) return url;
+    }
+    return '';
+  }
+
   function mapTransaction(tx, orderCtx, shipmentInfo = null) {
     const product    = getV(tx, 'product', 'product') || {};
     const variations = getV(tx, 'variations', 'variations') || [];
 
     const variationStr = variations.map(v => `${v.property}: ${v.value}`).join(' | ');
+    // Buyer-entered personalization answers (e.g. "Custom text", "Upload your photo")
+    const customOptions = variations
+      .filter(v => /Personalization/i.test(v.type || ''))
+      .map(v => `${v.property}: ${v.value}`)
+      .join(' | ');
+
+    const imageUrl = getItemImage(tx, product);
+    if (!imageUrl && !mapTransaction.loggedNoImage) {
+      mapTransaction.loggedNoImage = true;
+      console.log('[Sellfern][Etsy] No image found for item. tx keys:', Object.keys(tx), 'product keys:', Object.keys(product));
+      console.log('[Sellfern][Etsy] Raw transaction:', JSON.stringify(tx, null, 2));
+    }
 
     // SKU: use product_identifier (e.g. "VCN-CA-S2D0169-CTV")
     const sku = getV(product, 'product_identifier', 'productIdentifier') || '';
@@ -641,7 +752,9 @@
       quantity:        getV(tx, 'quantity', 'quantity') || 1,
       price,
       variations:      variationStr,
+      imageUrl,
       personalization: orderCtx.buyerNote,
+      customOptions,
 
       // Shipping / Order context (flattened onto each item — Sellfern style)
       orderId:         orderCtx.orderId,
@@ -797,189 +910,137 @@
     }
   }
 
-  // ─── Flow Studio: "Push to Flow Studio" button injection ───────────────────
-  // Best-effort: Etsy's live "Orders → Sold" DOM was not available to verify
-  // against a real session. Row/link selectors are centralized here so a
-  // live-tuning pass (triggered by the console.warn below) is a small,
-  // localized edit rather than a rewrite.
-
-  const FLOW_SELECTORS = {
-    rowCandidates: [
-      '[data-order-id]',
-      '[data-receipt-id]',
-      'li[data-wc-list-item]',
-    ],
-    rowIdAttrs: ['data-order-id', 'data-receipt-id', 'data-id'],
-    linkIdPattern: /\/(?:orders|receipts)\/sold\/(?:completed\/)?(\d+)|[?&](?:order_id|receipt_id)=(\d+)/,
-  };
+  // ─── Flow Studio: "Push to Flow Studio" button (order detail only) ─────────
+  // Etsy opens an order's detail on the same Orders page with ?order_id=<id>
+  // in the URL, so the button is a single fixed-position control that exists
+  // only while that param is present — no dependency on Etsy's detail DOM.
 
   function isOrdersSoldPage() {
     return /\/your\/orders\/sold/.test(location.pathname);
   }
 
-  function extractOrderIdFromRow(row) {
-    for (const attr of FLOW_SELECTORS.rowIdAttrs) {
-      const v = row.getAttribute?.(attr);
-      if (v) return v;
-    }
-    const link = row.querySelector?.('a[href]');
-    if (link) {
-      const m = (link.getAttribute('href') || '').match(FLOW_SELECTORS.linkIdPattern);
-      if (m) return m[1] || m[2];
+  // The detail drawer doesn't always put order_id in the URL, so fall back to
+  // its "Receipt #<id>" heading (visible in the drawer's receipt section).
+  function getDetailOrderId() {
+    const id = new URLSearchParams(location.search).get('order_id');
+    if (id && /^\d{8,12}$/.test(id)) return id;
+
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const m = (n.nodeValue || '').trim().match(/^Receipt\s*#(\d{8,12})$/i);
+      if (m) return m[1];
     }
     return null;
   }
 
-  function findOrderRows() {
-    for (const sel of FLOW_SELECTORS.rowCandidates) {
-      const els = document.querySelectorAll(sel);
-      if (els.length) return Array.from(els);
-    }
-    // Fallback: derive rows from any link that looks like an order/receipt link.
-    const links = Array.from(document.querySelectorAll('a[href]')).filter((a) =>
-      FLOW_SELECTORS.linkIdPattern.test(a.getAttribute('href') || '')
-    );
-    const rows = new Set();
-    links.forEach((a) => {
-      const row = a.closest('li, tr, [role="listitem"], article') || a.parentElement;
-      if (row) rows.add(row);
-    });
-    return Array.from(rows);
-  }
+  const FLOW_BTN_HOST_ID = '__sellfern-flow-detail-btn';
 
-  let flowScanWarned = false;
-
-  function scanAndInjectOrderButtons() {
+  function syncDetailButton() {
     if (!window.__sellfernFlow) return;
-    const rows = findOrderRows();
-    if (!rows.length) {
-      if (!flowScanWarned) {
-        console.warn(
-          '[Sellfern] Could not find any order rows to attach "Push to Flow Studio" buttons. ' +
-          'FLOW_SELECTORS in content/etsy.js may need updating for this Etsy layout.'
-        );
-        flowScanWarned = true;
-      }
+    const orderId = isOrdersSoldPage() ? getDetailOrderId() : null;
+    const host = document.getElementById(FLOW_BTN_HOST_ID);
+
+    if (!orderId) {
+      host?.remove();
       return;
     }
+    if (host?.dataset.orderId === orderId) return;
+    host?.remove();
 
-    rows.forEach((row) => {
-      if (row.hasAttribute('data-sellfern-injected')) return;
-      const orderId = extractOrderIdFromRow(row);
-      if (!orderId) return;
-
-      // Real order cards visibly show their receipt number as "#<id>" next
-      // to the buyer name (confirmed from a real screenshot) — the state
-      // filter tabs (All / New / Completed …) don't, but can still get
-      // false-matched by the loose selectors above on some layouts. Require
-      // that visible marker plus a plausible receipt-id digit length so we
-      // only ever attach to genuine order cards, not nav/filter chrome.
-      const looksLikeReceiptId = /^\d{8,12}$/.test(orderId);
-      const hasVisibleHashId = row.textContent?.includes('#' + orderId);
-      row.setAttribute('data-sellfern-injected', '1');
-      if (!looksLikeReceiptId || !hasVisibleHashId) return;
-
-      const container = document.createElement('span');
-      container.style.display = 'inline-block';
-      row.appendChild(container);
-
-      window.__sellfernFlow.injectButton(container, {
-        label: 'Push to Flow Studio',
-        title: 'Create a Flow Studio card for this order',
-        onClick: () => handlePushOrderToFlow(orderId),
-      });
+    const container = document.createElement('div');
+    container.id = FLOW_BTN_HOST_ID;
+    container.dataset.orderId = orderId;
+    Object.assign(container.style, {
+      position: 'fixed',
+      right: '24px',
+      bottom: '24px',
+      zIndex: '2147483000',
     });
+    document.body.appendChild(container);
+
+    window.__sellfernFlow.injectButton(container, {
+      label: 'Push to Flow Studio',
+      title: 'Create a Flow Studio card for this order',
+      onClick: () => handlePushOrderToFlow(orderId),
+    });
+  }
+
+  // Attachments the buyer uploaded for personalization. The page fetches
+  // them itself when the detail view opens (captured in etsy-main.js), so
+  // wait briefly for that response instead of making our own request. The
+  // response shape isn't confirmed, so collect every http(s) URL in it.
+  async function getPersonalizationFileUrls(orderId, timeoutMs = 4000) {
+    const key = String(orderId);
+    const deadline = Date.now() + timeoutMs;
+    while (!capturedPersonalizationFiles.has(key) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    const data = capturedPersonalizationFiles.get(key);
+    console.log('[Sellfern][Flow] personalization-files (captured):', data);
+
+    const urls = new Set();
+    (function walk(v) {
+      if (typeof v === 'string') { if (/^https?:\/\//.test(v)) urls.add(v); }
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+    })(data);
+    return Array.from(urls);
   }
 
   // Etsy has no AJAX endpoint that returns one order's full detail (confirmed
   // live — opening an order only fires /orders/convos/<id> and
-  // /orders/earnings/<id>/details/all, never a core detail call). The data
-  // always comes from the orders *list* endpoint, which the page itself has
-  // typically already called and content/etsy-main.js has already captured
-  // into capturedOrdersCache — so check that first and only hit the network
-  // ourselves if this particular order hasn't been seen yet (e.g. it's
-  // further down the list than what's loaded so far).
-  //
-  // search_terms on the list endpoint does not reliably match on order/
-  // receipt ID (confirmed broken against a real shop) — it's tried first as
-  // a cheap opportunistic shortcut, but the real fallback lookup is a
-  // bounded page-walk through whichever order-state bucket (New/Completed)
-  // the current page is showing, since that's guaranteed to contain the
-  // order the button was clicked on.
-  async function findEtsyOrderById(shopId, orderId) {
-    const cachedOrder = capturedOrdersCache.get(String(orderId));
-    if (cachedOrder) {
-      console.log('[Sellfern][Flow] Using passively-captured order data — no extra request needed.');
-      return { match: cachedOrder, buyerMap: capturedBuyersMap };
+  // /orders/earnings/<id>/details/all). The data always comes from the orders
+  // *list* endpoint, which the page itself calls and content/etsy-main.js
+  // captures into capturedOrdersCache. We only ever read that cache — no
+  // request of our own — waiting briefly in case the capture is still in flight.
+  async function findEtsyOrderById(orderId, timeoutMs = 3000) {
+    const key = String(orderId);
+    const deadline = Date.now() + timeoutMs;
+    requestReplay();
+    if (!capturedOrdersCache.has(key)) ingestEmbeddedOrders();
+    while (!capturedOrdersCache.has(key) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
     }
-
-    const label = /\/completed/.test(location.pathname) ? 'Completed' : 'New';
-    const states = getOrderStates();
-    const stateMatch = states.find((s) => s.label?.toLowerCase().includes(label.toLowerCase()));
-    // Every OTHER filter in this request uses the literal string 'all' to
-    // mean "unrestricted" (buyer_id, channel, completed_status, destination,
-    // ship_date are all 'all' by default) — order_state_id is the odd one
-    // out normally driven by a real detected ID, so when we can't detect one
-    // we mirror that same convention instead of sending ''.
-    const orderStateId = stateMatch?.id || 'all';
-
-    console.log('[Sellfern][Flow] Looking up order', orderId, { label, orderStateId, statesFound: states.length });
-
-    const ctx = getDynamicContext(orderStateId);
-    ctx.orderStateLabel = label;
-    // 'all' time range, not 'last_90_days' — we don't know how old the
-    // clicked order is (completed orders can be well over 90 days old, as
-    // confirmed live: a Jan-2025 order returned zero results until this was
-    // changed), and the whole point of this lookup is it could be any age.
-    ctx.timeframeValue = 'all';
-
-    try {
-      const quick = await fetchOrderPage(shopId, 0, 10, { ...ctx, searchTerms: orderId });
-      const qSearch = quick?.orders_search || quick?.ordersSearch;
-      const qOrders = getV(qSearch, 'orders', 'orders') || [];
-      console.log('[Sellfern][Flow] search_terms attempt returned', qOrders.length, 'orders');
-      const qMatch = qOrders.find((o) => getOrderId(o) === String(orderId));
-      if (qMatch) return { match: qMatch, buyerMap: buildBuyerMap(getV(qSearch, 'buyers', 'buyers') || []) };
-    } catch (err) {
-      console.log('[Sellfern][Flow] search_terms attempt failed:', err.message);
+    const match = capturedOrdersCache.get(key);
+    if (!match) {
+      console.warn('[Sellfern][Flow] Order not in captured cache:', key, 'cache size:', capturedOrdersCache.size);
+      return null;
     }
-
-    let offset = 0;
-    const limit = 100;
-    for (let guard = 0; guard < 20; guard++) {
-      const data = await fetchOrderPage(shopId, offset, limit, ctx);
-      const search = data?.orders_search || data?.ordersSearch;
-      const rawOrders = getV(search, 'orders', 'orders') || [];
-      console.log('[Sellfern][Flow] page-walk offset', offset, 'returned', rawOrders.length, 'orders', rawOrders.map(getOrderId));
-      const match = rawOrders.find((o) => getOrderId(o) === String(orderId));
-      if (match) return { match, buyerMap: buildBuyerMap(getV(search, 'buyers', 'buyers') || []) };
-      if (rawOrders.length < limit) break; // no more pages
-      offset += rawOrders.length;
-    }
-    return null;
+    return { match, buyerMap: capturedBuyersMap };
   }
 
   async function handlePushOrderToFlow(orderId) {
     try {
-      const shopId = getShopId();
-      if (!shopId) throw new Error('Could not detect your Etsy Shop ID on this page.');
-
       const { defaultStore } = await new Promise((res) =>
         chrome.storage.local.get(['defaultStore'], res)
       );
 
-      const found = await findEtsyOrderById(shopId, orderId);
+      const found = await findEtsyOrderById(orderId);
       if (!found) {
-        throw new Error('Could not find this order after scanning recent orders. Please try again.');
+        throw new Error('This order has not been loaded by the Orders page yet. Reload the Orders page (F5) and open the order again.');
       }
 
       const mapped = mapOrder(found.match, found.buyerMap, defaultStore);
-      const customText = mapped.items?.[0]?.personalization || '';
+      // Custom text = per-item personalization answers + order-level buyer/seller notes.
+      const items = mapped.items || [];
+      const customLines = [];
+      items.forEach((item, i) => {
+        if (item.customOptions) {
+          const label = items.length > 1 ? `Item ${i + 1} (${item.name})` : 'Personalization';
+          customLines.push(`${label}: ${item.customOptions.replace(/ \| /g, '\n  ')}`);
+        }
+      });
+      if (mapped.buyerNote) customLines.push(`Buyer note: ${mapped.buyerNote}`);
+      (mapped.privateNotes || []).forEach((n) => customLines.push(`Seller note: ${n}`));
+      const fileUrls = await getPersonalizationFileUrls(orderId);
+      fileUrls.forEach((url, i) => customLines.push(`Attachment ${i + 1}: ${url}`));
+      const customText = customLines.join('\n');
       const storeName = defaultStore || '';
       const products = (mapped.items || []).map((item) => {
         const parts = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
         if (item.sku) parts.push(`SKU: ${item.sku}`);
         if (item.variations) parts.push(item.variations);
+        if (item.imageUrl) parts.push(`Image: ${item.imageUrl}`);
         return parts.join(' — ');
       });
 
@@ -993,15 +1054,25 @@
       });
     } catch (err) {
       console.error('[Sellfern] Failed to prepare Flow Studio push:', err);
-      alert(`Could not load this order's details: ${err.message}`);
+      alert(
+        /context invalidated/i.test(err.message)
+          ? 'The Sellfern extension was updated or reloaded. Please refresh this page (F5) and try again.'
+          : `Could not load this order's details: ${err.message}`
+      );
     }
   }
 
-  if (isOrdersSoldPage()) {
-    const observer = new MutationObserver(() => scanAndInjectOrderButtons());
-    observer.observe(document.body, { childList: true, subtree: true });
-    scanAndInjectOrderButtons();
-  }
+  // Etsy is a SPA: the user can reach the Orders page without a full load, so
+  // always observe and let syncDetailButton decide (debounced — it walks text).
+  let syncTimer = null;
+  const scheduleSync = () => {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(syncDetailButton, 250);
+  };
+  new MutationObserver(scheduleSync).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('popstate', scheduleSync);
+  syncDetailButton();
+  ingestEmbeddedOrders();
 
   console.log('[Sellfern Scraper] Etsy Mission Control API connector loaded.');
 })();

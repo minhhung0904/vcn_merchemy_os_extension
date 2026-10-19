@@ -11,40 +11,85 @@
 
   // ─── Button injection helper ──────────────────────────────────────────────
 
+  // Rendered inside a shadow root so Etsy/Shopify page CSS can't restyle it.
+  // Look follows the Sellfern popup: teal gradient pill, Inter, brand mark.
   function injectButton(container, { label = 'Push to Flow Studio', onClick, title } = {}) {
     if (!container) return null;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = label;
+
+    let iconUrl = '';
+    try { iconUrl = chrome.runtime.getURL('icons/icon32.png'); } catch (_) {}
+
+    const host = document.createElement('span');
+    host.setAttribute('data-sellfern-flow-btn', '1');
+    host.style.display = 'inline-block';
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `
+      <style>
+        button {
+          display: inline-flex; align-items: center; gap: 8px;
+          padding: 9px 16px 9px 10px;
+          font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+          font-size: 13px; font-weight: 600; line-height: 1; letter-spacing: 0.01em;
+          color: #fff; white-space: nowrap; cursor: pointer;
+          background: linear-gradient(180deg, #14b8a6, #0d9488);
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          border-radius: 999px;
+          box-shadow: 0 6px 18px rgba(13, 148, 136, 0.35), 0 1px 2px rgba(0, 0, 0, 0.15);
+          transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        }
+        button:hover {
+          background: linear-gradient(180deg, #2dd4bf, #0d9488);
+          box-shadow: 0 8px 22px rgba(13, 148, 136, 0.45), 0 1px 2px rgba(0, 0, 0, 0.15);
+          transform: translateY(-1px);
+        }
+        button:active { transform: translateY(0); box-shadow: 0 3px 10px rgba(13, 148, 136, 0.35); }
+        button:focus-visible { outline: 2px solid #99f6e4; outline-offset: 2px; }
+        button:disabled { cursor: progress; opacity: 0.85; transform: none; background: linear-gradient(180deg, #14b8a6, #0d9488); }
+        .spinner {
+          display: none; width: 14px; height: 14px; flex: none;
+          border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff;
+          border-radius: 50%; animation: spin 0.7s linear infinite;
+        }
+        button.loading .spinner { display: block; }
+        button.loading .arrow { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .mark {
+          width: 22px; height: 22px; border-radius: 50%; background: #fff;
+          display: inline-flex; align-items: center; justify-content: center; flex: none;
+        }
+        .mark img { width: 16px; height: 16px; display: block; }
+        .arrow { width: 14px; height: 14px; flex: none; }
+      </style>
+      <button type="button">
+        ${iconUrl ? `<span class="mark"><img src="${iconUrl}" alt="" /></span>` : ''}
+        <span class="label"></span>
+        <span class="spinner"></span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
+      </button>
+    `;
+    const btn = root.querySelector('button');
+    root.querySelector('.label').textContent = label;
     if (title) btn.title = title;
-    btn.setAttribute('data-sellfern-flow-btn', '1');
-    Object.assign(btn.style, {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      padding: '4px 10px',
-      margin: '0 4px',
-      fontSize: '12px',
-      fontWeight: '600',
-      lineHeight: '1.4',
-      color: '#ffffff',
-      background: '#5b4fe9',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      whiteSpace: 'nowrap',
-      zIndex: '2147483000',
-    });
-    btn.addEventListener('mouseenter', () => { btn.style.background = '#473dc9'; });
-    btn.addEventListener('mouseleave', () => { btn.style.background = '#5b4fe9'; });
-    btn.addEventListener('click', (e) => {
+    const labelEl = root.querySelector('.label');
+    btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      onClick?.(e);
+      if (btn.disabled) return;
+      // Show a busy state while the handler (returns a promise) is working,
+      // so the click visibly registers and can't be double-fired.
+      btn.disabled = true;
+      btn.classList.add('loading');
+      labelEl.textContent = 'Loading order…';
+      try {
+        await onClick?.(e);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+        labelEl.textContent = label;
+      }
     });
-    container.appendChild(btn);
-    return btn;
+    container.appendChild(host);
+    return host;
   }
 
   // ─── Modal ─────────────────────────────────────────────────────────────────
@@ -68,17 +113,17 @@
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `
       <style>
-        .backdrop { position: fixed; inset: 0; background: rgba(15, 15, 20, 0.5); display: flex; align-items: center; justify-content: center; font-family: system-ui, -apple-system, sans-serif; }
-        .card { width: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; background: #fff; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); padding: 20px; }
+        .backdrop { position: fixed; inset: 0; background: rgba(15, 15, 20, 0.5); display: flex; align-items: center; justify-content: center; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+        .card { width: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(15,23,42,0.35); padding: 20px; }
         h2 { margin: 0 0 4px; font-size: 16px; color: #16181d; }
         .sub { margin: 0 0 16px; font-size: 12px; color: #6b7280; }
         label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin: 12px 0 4px; }
-        select, input[type=text] { width: 100%; box-sizing: border-box; padding: 7px 8px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 6px; color: #111827; }
+        select, input[type=text] { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 8px; color: #111827; }
         .preview { max-height: 90px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; font-size: 12px; color: #374151; white-space: pre-wrap; }
         .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-        button { font-family: inherit; font-size: 13px; font-weight: 600; border-radius: 6px; padding: 7px 14px; cursor: pointer; border: none; }
-        .btn-cancel { background: #f3f4f6; color: #374151; }
-        .btn-submit { background: #5b4fe9; color: #fff; }
+        button { font-family: inherit; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 8px 18px; cursor: pointer; border: none; }
+        .btn-cancel { background: #f1f5f9; color: #475569; }
+        .btn-submit { background: linear-gradient(180deg, #14b8a6, #0d9488); color: #fff; }
         .btn-submit:disabled { opacity: 0.6; cursor: default; }
         .status { margin-top: 10px; font-size: 12px; }
         .status.error { color: #dc2626; }
@@ -103,7 +148,7 @@
           <label>Products</label>
           <div class="preview">${
             (products && products.length)
-              ? products.map((p) => escapeHtml(p)).join('<br/>')
+              ? products.map((p) => linkify(p)).join('<br/>')
               : '<em>No product details found for this order.</em>'
           }</div>
 
@@ -210,6 +255,14 @@
         setTimeout(() => closeModal(host), 1200);
       });
     });
+  }
+
+  // Escape, then turn http(s) URLs (e.g. the product image) into clickable links.
+  function linkify(str) {
+    return escapeHtml(str).replace(
+      /https?:\/\/[^\s<]+/g,
+      (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#0d9488;">${url}</a>`
+    );
   }
 
   function escapeHtml(str) {

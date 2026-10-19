@@ -116,6 +116,12 @@
     // order still carries its total/quantity if per-item detail is absent.
     const edges = node.lineItems?.edges || node.lineItems?.nodes?.map((n) => ({ node: n })) || [];
 
+    if (!mapLineItems.logged) {
+      mapLineItems.logged = true;
+      console.log('[Sellfern][Shopify] Order node keys:', Object.keys(node));
+      console.log('[Sellfern][Shopify] First line item raw:', JSON.stringify(edges[0]?.node ?? null, null, 2));
+    }
+
     if (!edges.length) {
       return [{
         id: orderCtx.orderId,
@@ -137,6 +143,7 @@
       quantity: li.quantity || 1,
       price: Number(li.originalUnitPriceSet?.shopMoney?.amount ?? li.discountedUnitPriceSet?.shopMoney?.amount ?? 0),
       variations: li.variantTitle || li.variant?.title || '',
+      imageUrl: li.image?.url || li.image?.src || li.variant?.image?.url || li.product?.featuredImage?.url || '',
       personalization: '',
       ...orderCtx,
       status: orderCtx.fulfillmentStatus,
@@ -347,6 +354,7 @@
         const parts = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
         if (item.sku) parts.push(`SKU: ${item.sku}`);
         if (item.variations) parts.push(item.variations);
+        if (item.imageUrl) parts.push(`Image: ${item.imageUrl}`);
         return parts.join(' — ');
       });
 
@@ -360,7 +368,11 @@
       });
     } catch (err) {
       console.error('[Sellfern] Failed to prepare Flow Studio push:', err);
-      alert(`Could not load this order's details: ${err.message}`);
+      alert(
+        /context invalidated/i.test(err.message)
+          ? 'The Sellfern extension was updated or reloaded. Please refresh this page (F5) and try again.'
+          : `Could not load this order's details: ${err.message}`
+      );
     }
   }
 
