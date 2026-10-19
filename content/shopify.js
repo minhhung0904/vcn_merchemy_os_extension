@@ -27,6 +27,14 @@
   // ─── State: latest captured OrderListData template ───────────────────────
 
   let capturedTemplate = null; // { base, variables, firstPage }
+  const nodeCache = new Map(); // orderId -> raw order node, seen across any page we've fetched
+
+  function cacheNodes(edges) {
+    (edges || []).forEach((e) => {
+      const node = e.node || e;
+      if (node?.id) nodeCache.set(gidToId(node.id), node);
+    });
+  }
 
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
@@ -35,6 +43,7 @@
 
     if (data.type === 'ORDER_LIST_TEMPLATE') {
       capturedTemplate = data.payload;
+      cacheNodes(capturedTemplate?.firstPage?.edges);
       console.log('[Sellfern] Captured a live OrderListData template.', capturedTemplate?.base);
     }
   });
@@ -79,6 +88,7 @@
 
     while (page) {
       const edges = page.edges || [];
+      cacheNodes(edges);
       nodes.push(...edges.map((e) => e.node));
       onProgress?.(nodes.length);
 
@@ -257,6 +267,178 @@
       sendResponse({ ok: false, error: err.message });
     }
   }
+
+  // ─── Flow Studio: "Push to Flow Studio" button injection ───────────────────
+  // Shopify's admin order table rows are more structurally predictable than
+  // Etsy's (Polaris <table>/<tr> with a primary <a href=".../orders/<id>">),
+  // but this has not been live-verified this round either — selectors are
+  // centralized here for a quick fix if the console.warn below fires.
+
+  const FLOW_SELECTORS_SHOPIFY = {
+    orderLinkPattern: /\/orders\/(\d+)(?:[/?]|$)/,
+  };
+
+  function isOrdersPage() {
+    return /\/orders(\/|$|\?)/.test(location.pathname);
+  }
+
+  function getDetailOrderId() {
+    const m = location.pathname.match(/\/orders\/(\d+)(?:\/|$)/);
+    return m ? m[1] : null;
+  }
+
+  function findOrderRows() {
+    const rows = new Set();
+    document.querySelectorAll('a[href*="/orders/"]').forEach((a) => {
+      const m = (a.getAttribute('href') || '').match(FLOW_SELECTORS_SHOPIFY.orderLinkPattern);
+      if (!m) return;
+      const row = a.closest('tr') || a.closest('[role="row"]');
+      if (row) rows.add(row);
+    });
+    return Array.from(rows);
+  }
+
+  async function findOrderNodeById(orderId) {
+    const cached = nodeCache.get(String(orderId));
+    if (cached) return cached;
+    if (!capturedTemplate) {
+      throw new Error(
+        'No live Shopify order query captured yet. Please reload this store\'s Orders page and try again.'
+      );
+    }
+
+    let page = capturedTemplate.firstPage;
+    let guard = 0;
+    while (page) {
+      const edges = page.edges || [];
+      cacheNodes(edges);
+      const found = edges.map((e) => e.node).find((n) => gidToId(n.id) === String(orderId));
+      if (found) return found;
+
+      const pageInfo = page.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo?.endCursor) break;
+      if (++guard > 20) break; // bounded search, mirrors fetchAllOrders' own safety cap
+      page = await fetchOrderListPage(capturedTemplate, { after: pageInfo.endCursor, before: null });
+    }
+    return nodeCache.get(String(orderId)) || null;
+  }
+
+  async function handlePushOrderToFlowShopify(orderId) {
+    try {
+      const node = await findOrderNodeById(orderId);
+      if (!node) throw new Error('Could not find this order in the captured order list. Try reloading the Orders page.');
+
+      const { shopifyStoreName } = await new Promise((res) =>
+        chrome.storage.local.get(['shopifyStoreName'], res)
+      );
+      const storeName = shopifyStoreName || '';
+      // Best effort: Shopify order nodes carry no scraped personalization
+      // field today (mapLineItems hardcodes it blank) — fall back to the
+      // order's own note, if the captured query happens to include it.
+      const customText = node.note || '';
+
+      const money = node.currentTotalPriceSet?.shopMoney || {};
+      const items = mapLineItems(node, {
+        orderId,
+        totalAmount: Number(money.amount || 0),
+        fulfillmentStatus: node.displayFulfillmentStatus || '',
+      });
+      const products = items.map((item) => {
+        const parts = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
+        if (item.sku) parts.push(`SKU: ${item.sku}`);
+        if (item.variations) parts.push(item.variations);
+        return parts.join(' — ');
+      });
+
+      window.__sellfernFlow.openPushModal({
+        orderId,
+        platform: 'shopify',
+        storeName,
+        customText,
+        products,
+        suggestedTitle: `${storeName ? storeName + ' – ' : ''}${node.name || 'Order #' + orderId}`,
+      });
+    } catch (err) {
+      console.error('[Sellfern] Failed to prepare Flow Studio push:', err);
+      alert(`Could not load this order's details: ${err.message}`);
+    }
+  }
+
+  function injectDetailButton(orderId) {
+    if (document.querySelector('[data-sellfern-detail-injected]')) return;
+    const marker = document.createElement('span');
+    marker.setAttribute('data-sellfern-detail-injected', '1');
+    marker.style.display = 'inline-block';
+
+    const header = document.querySelector('h1')?.closest('div');
+    if (header) {
+      header.appendChild(marker);
+    } else {
+      Object.assign(marker.style, { position: 'fixed', bottom: '24px', right: '24px', zIndex: '2147483000' });
+      document.body.appendChild(marker);
+    }
+
+    window.__sellfernFlow.injectButton(marker, {
+      label: 'Push to Flow Studio',
+      title: 'Create a Flow Studio card for this order',
+      onClick: () => handlePushOrderToFlowShopify(orderId),
+    });
+  }
+
+  let flowScanWarnedShopify = false;
+
+  function scanAndInjectShopifyButtons() {
+    if (!window.__sellfernFlow || !isOrdersPage()) return;
+
+    const detailId = getDetailOrderId();
+    if (detailId) {
+      injectDetailButton(detailId);
+      return;
+    }
+
+    const rows = findOrderRows();
+    if (!rows.length) {
+      if (!flowScanWarnedShopify) {
+        console.warn(
+          '[Sellfern] Could not find any order rows to attach "Push to Flow Studio" buttons. ' +
+          'FLOW_SELECTORS_SHOPIFY in content/shopify.js may need updating for this Shopify layout.'
+        );
+        flowScanWarnedShopify = true;
+      }
+      return;
+    }
+
+    rows.forEach((row) => {
+      if (row.hasAttribute('data-sellfern-injected')) return;
+      const link = row.querySelector('a[href*="/orders/"]');
+      const m = link && (link.getAttribute('href') || '').match(FLOW_SELECTORS_SHOPIFY.orderLinkPattern);
+      if (!m) return;
+      const orderId = m[1];
+      row.setAttribute('data-sellfern-injected', '1');
+
+      const container = document.createElement('span');
+      container.style.display = 'inline-block';
+      row.appendChild(container);
+
+      window.__sellfernFlow.injectButton(container, {
+        label: 'Push to Flow Studio',
+        title: 'Create a Flow Studio card for this order',
+        onClick: () => handlePushOrderToFlowShopify(orderId),
+      });
+    });
+  }
+
+  function initFlowButtonInjector() {
+    if (!document.body) {
+      document.addEventListener('DOMContentLoaded', initFlowButtonInjector, { once: true });
+      return;
+    }
+    const observer = new MutationObserver(() => scanAndInjectShopifyButtons());
+    observer.observe(document.body, { childList: true, subtree: true });
+    scanAndInjectShopifyButtons();
+  }
+
+  initFlowButtonInjector();
 
   console.log('[Sellfern] Shopify unified-admin connector loaded.');
 })();

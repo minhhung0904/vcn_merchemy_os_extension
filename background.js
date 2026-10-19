@@ -48,7 +48,95 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     );
     return true;
   }
+
+  if (message.type === "GET_FLOW_BOARDS") {
+    handleGetFlowBoards()
+      .then((boards) => sendResponse({ ok: true, boards }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === "GET_FLOW_BOARD_DETAIL") {
+    handleGetFlowBoardDetail(message.boardId)
+      .then((board) => sendResponse({ ok: true, board }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === "CREATE_FLOW_CARD") {
+    handleCreateFlowCard(message)
+      .then((card) => sendResponse({ ok: true, card }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
 });
+
+// ─── Flow Studio ──────────────────────────────────────────────────────────────
+
+async function flowStudioFetch(path, options = {}) {
+  const { apiToken } = await getSettings();
+  if (!apiToken)
+    throw new Error("No API token configured. Please set it in the extension Settings.");
+
+  const res = await fetch(`${DEFAULT_API_URL}/flow-studio${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiToken,
+      ...(options.headers || {}),
+    },
+  });
+
+  if (res.status === 401) {
+    throw new Error("Invalid or expired API token. Please update it in the extension Settings.");
+  }
+  if (res.status === 403) {
+    throw new Error("You don't have access to this board in Sellfern yet — ask a teammate to add you in Flow Studio.");
+  }
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error?.message || body.error || `HTTP ${res.status}: Flow Studio request failed.`);
+  }
+  return body.success ? body.data : body;
+}
+
+async function handleGetFlowBoards() {
+  return flowStudioFetch("/boards", { method: "GET" });
+}
+
+async function handleGetFlowBoardDetail(boardId) {
+  if (!boardId) throw new Error("Missing boardId.");
+  return flowStudioFetch(`/boards/${boardId}`, { method: "GET" });
+}
+
+async function handleCreateFlowCard({ boardId, columnId, title, orderId, platform, storeName, customText, products }) {
+  if (!boardId) throw new Error("Please choose a board.");
+  if (!columnId) throw new Error("Please choose a column.");
+  if (!title || !title.trim()) throw new Error("Please enter a card title.");
+
+  const description = [
+    `Order ID: ${orderId || ""}`,
+    `Store: ${storeName || ""}`,
+    "",
+    "Products:",
+    products?.length ? products.map((p) => `- ${p}`).join("\n") : "(none)",
+    "",
+    "Custom Text:",
+    customText || "(none)",
+  ].join("\n");
+
+  return flowStudioFetch(`/boards/${boardId}/cards`, {
+    method: "POST",
+    body: JSON.stringify({
+      title: title.trim(),
+      column_id: columnId,
+      card_type: "custom_product",
+      description,
+      metadata: { source: "sellfern-extension", platform, orderId, storeName, products: products || [] },
+    }),
+  });
+}
 
 // ─── Push orders to Sellfern ─────────────────────────────────────────────────
 

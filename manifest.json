@@ -45,7 +45,13 @@
   "content_scripts": [
     {
       "matches": ["https://www.etsy.com/*"],
-      "js": ["content/etsy.js"],
+      "js": ["content/etsy-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.etsy.com/*"],
+      "js": ["content/flow-modal.js", "content/etsy.js"],
       "run_at": "document_idle"
     },
     {
@@ -56,7 +62,7 @@
     },
     {
       "matches": ["https://admin.shopify.com/*"],
-      "js": ["content/shopify.js"],
+      "js": ["content/flow-modal.js", "content/shopify.js"],
       "run_at": "document_start"
     }
   ],
