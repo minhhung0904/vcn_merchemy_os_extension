@@ -257,6 +257,97 @@
     });
   }
 
+  // ─── Error messages ────────────────────────────────────────────────────────
+  // Turns a caught error into a clear, actionable reason instead of dumping
+  // its raw message (a bare TypeError, "Failed to fetch", a runtime-messaging
+  // error, etc.) in front of the user. Unrecognized errors still get a
+  // concrete next step, just without parroting the raw text — the raw error
+  // is already in the console via the caller's console.error.
+  function describePushError(err) {
+    const msg = String(err?.message || err || '');
+
+    if (/context invalidated/i.test(msg)) {
+      return 'The Sellfern extension was updated or reloaded. Please refresh this page (F5) and try again.';
+    }
+    if (/could not establish connection|receiving end does not exist/i.test(msg)) {
+      return 'The Sellfern extension did not respond in time. Please refresh this page (F5) and try again.';
+    }
+    if (/failed to fetch|networkerror|network request failed|load failed/i.test(msg)) {
+      return "Could not reach the page's data — check your internet connection and try again.";
+    }
+    if (/not been loaded by the Orders page/i.test(msg)) {
+      return msg;
+    }
+    if (/no api token configured/i.test(msg)) {
+      return 'No Sellfern API token is set. Open the extension Settings and add one, then try again.';
+    }
+    if (/invalid or expired api token/i.test(msg)) {
+      return 'Your Sellfern API token is invalid or has expired. Update it in the extension Settings and try again.';
+    }
+    if (/not in this organization|contact your admin/i.test(msg)) {
+      return msg;
+    }
+
+    return "This order's details could not be read. Please reload the Orders page (F5) and try again — if it keeps happening, check the browser console for the underlying error.";
+  }
+
+  // ─── Error popup ───────────────────────────────────────────────────────────
+  // Same card/backdrop look as the push modal, used instead of alert() so a
+  // failure (e.g. the order didn't load) doesn't break out of the extension's
+  // own styling into a bare browser dialog.
+
+  function showError(message, { title = 'Something went wrong' } = {}) {
+    document.getElementById('__sellfern-flow-error-host')?.remove();
+
+    const host = document.createElement('div');
+    host.id = '__sellfern-flow-error-host';
+    Object.assign(host.style, {
+      position: 'fixed', inset: '0', zIndex: '2147483647',
+    });
+    document.body.appendChild(host);
+
+    const root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = `
+      <style>
+        .backdrop { position: fixed; inset: 0; background: rgba(15, 15, 20, 0.5); display: flex; align-items: center; justify-content: center; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+        .card { width: 360px; max-width: calc(100vw - 32px); background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(15,23,42,0.35); padding: 20px; position: relative; }
+        .icon { width: 36px; height: 36px; border-radius: 50%; background: #fef2f2; color: #dc2626; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+        .icon svg { width: 20px; height: 20px; }
+        h2 { margin: 0 0 6px; font-size: 15px; color: #16181d; }
+        p.message { margin: 0; font-size: 13px; line-height: 1.5; color: #4b5563; white-space: pre-wrap; }
+        .actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+        button { font-family: inherit; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 8px 18px; cursor: pointer; border: none; }
+        .btn-ok { background: linear-gradient(180deg, #14b8a6, #0d9488); color: #fff; }
+        .close { position: absolute; top: 14px; right: 16px; background: none; color: #9ca3af; font-size: 18px; padding: 0; line-height: 1; border: none; cursor: pointer; }
+      </style>
+      <div class="backdrop">
+        <div class="card">
+          <button class="close" data-action="close">&times;</button>
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="13"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          </div>
+          <h2>${escapeHtml(title)}</h2>
+          <p class="message">${escapeHtml(message)}</p>
+          <div class="actions">
+            <button class="btn-ok" data-action="close">OK</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    root.querySelectorAll('[data-action="close"]').forEach((el) =>
+      el.addEventListener('click', () => closeModal(host))
+    );
+    root.querySelector('.backdrop').addEventListener('click', (e) => {
+      if (e.target.classList.contains('backdrop')) closeModal(host);
+    });
+
+    host.__onKeyDown = (e) => { if (e.key === 'Escape') closeModal(host); };
+    document.addEventListener('keydown', host.__onKeyDown);
+
+    return host;
+  }
+
   // Escape, then turn http(s) URLs (e.g. the product image) into clickable links.
   function linkify(str) {
     return escapeHtml(str).replace(
@@ -274,5 +365,5 @@
       .replace(/"/g, '&quot;');
   }
 
-  window.__sellfernFlow = { injectButton, openPushModal };
+  window.__sellfernFlow = { injectButton, openPushModal, showError, describePushError };
 })();

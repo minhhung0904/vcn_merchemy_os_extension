@@ -1059,10 +1059,9 @@
       });
     } catch (err) {
       console.error('[Sellfern] Failed to prepare Flow Studio push:', err);
-      alert(
-        /context invalidated/i.test(err.message)
-          ? 'The Sellfern extension was updated or reloaded. Please refresh this page (F5) and try again.'
-          : `Could not load this order's details: ${err.message}`
+      window.__sellfernFlow.showError(
+        window.__sellfernFlow.describePushError(err),
+        { title: 'Could not load order' }
       );
     }
   }
