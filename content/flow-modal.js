@@ -99,7 +99,7 @@
     document.removeEventListener('keydown', host.__onKeyDown);
   }
 
-  function openPushModal({ orderId, platform, storeName, customText, products, suggestedTitle }) {
+  function openPushModal({ orderId, platform, storeName, customText, products, suggestedTitle, attachmentUrls }) {
     // Avoid stacking multiple modals if clicked twice.
     document.getElementById('__sellfern-flow-modal-host')?.remove();
 
@@ -244,7 +244,7 @@
 
       chrome.runtime.sendMessage({
         type: 'CREATE_FLOW_CARD',
-        boardId, columnId, title, orderId, platform, storeName, customText, products,
+        boardId, columnId, title, orderId, platform, storeName, customText, products, attachmentUrls,
       }, (res) => {
         submitBtn.disabled = false;
         if (chrome.runtime.lastError || !res?.ok) {

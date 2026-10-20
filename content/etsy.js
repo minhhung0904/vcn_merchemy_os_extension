@@ -1051,6 +1051,7 @@
         customText,
         products,
         suggestedTitle: `${storeName ? storeName + ' – ' : ''}Order #${orderId}`,
+        attachmentUrls: fileUrls,
       });
     } catch (err) {
       console.error('[Sellfern] Failed to prepare Flow Studio push:', err);
