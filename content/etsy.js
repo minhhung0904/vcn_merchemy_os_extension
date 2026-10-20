@@ -982,13 +982,22 @@
     const data = capturedPersonalizationFiles.get(key);
     console.log('[Sellfern][Flow] personalization-files (captured):', data);
 
-    const urls = new Set();
+    // Etsy returns the same upload in several sizes (il_75x75.<id>.jpg,
+    // il_fullxfull.<id>.jpg, ...). Collapse those variants into one entry per
+    // file, preferring the fullxfull one.
+    const SIZE_RE = /\/il_(?:\d+x(?:\d+|N)|fullxfull)\./;
+    const byFile = new Map();
     (function walk(v) {
-      if (typeof v === 'string') { if (/^https?:\/\//.test(v)) urls.add(v); }
+      if (typeof v === 'string') {
+        if (!/^https?:\/\//.test(v)) return;
+        const key = v.replace(SIZE_RE, '/il_SIZE.');
+        const prev = byFile.get(key);
+        if (!prev || (v.includes('/il_fullxfull.') && !prev.includes('/il_fullxfull.'))) byFile.set(key, v);
+      }
       else if (Array.isArray(v)) v.forEach(walk);
       else if (v && typeof v === 'object') Object.values(v).forEach(walk);
     })(data);
-    return Array.from(urls);
+    return Array.from(byFile.values());
   }
 
   // Etsy has no AJAX endpoint that returns one order's full detail (confirmed
