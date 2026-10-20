@@ -916,7 +916,11 @@
   // only while that param is present — no dependency on Etsy's detail DOM.
 
   function isOrdersSoldPage() {
-    return /\/your\/orders\/sold/.test(location.pathname);
+    // Legacy orders page, plus the newer Mission Control seller dashboard
+    // (.../your/shops/<id-or-me>/dashboard), which now hosts the Orders tab
+    // under the same URL instead of navigating to /your/orders/sold.
+    return /\/your\/orders\/sold/.test(location.pathname)
+      || /\/your\/shops\/[^/]+\/dashboard/.test(location.pathname);
   }
 
   // The detail drawer doesn't always put order_id in the URL, so fall back to
