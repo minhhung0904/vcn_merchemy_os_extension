@@ -135,7 +135,7 @@ async function handleCreateFlowCard({ boardId, columnId, title, orderId, platfor
       description,
       metadata: { source: "sellfern-extension", platform, orderId, storeName, products: products || [] },
       // Backend downloads each link and re-hosts it on R2 as a real card
-      // attachment; the link itself still stays in `description` above.
+      // attachment.
       attachmentUrls: attachmentUrls || [],
     }),
   });

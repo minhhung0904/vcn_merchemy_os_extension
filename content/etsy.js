@@ -1046,7 +1046,6 @@
       if (mapped.buyerNote) customLines.push(`Buyer note: ${mapped.buyerNote}`);
       (mapped.privateNotes || []).forEach((n) => customLines.push(`Seller note: ${n}`));
       const fileUrls = await getPersonalizationFileUrls(orderId);
-      fileUrls.forEach((url, i) => customLines.push(`Attachment ${i + 1}: ${url}`));
       const customText = customLines.join('\n');
       const storeName = defaultStore || '';
       const products = (mapped.items || []).map((item) => {
