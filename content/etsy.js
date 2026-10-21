@@ -720,6 +720,9 @@
       .filter(v => /Personalization/i.test(v.type || ''))
       .map(v => `${v.property}: ${v.value}`)
       .join(' | ');
+    // A variation titled "Color" or "Colour" maps straight to the CMS's own color column.
+    const colorVariation = variations.find(v => /^colou?r$/i.test(String(v.property || '').trim()));
+    const color = colorVariation ? colorVariation.value : '';
 
     const imageUrl = getItemImage(tx, product);
     if (!imageUrl && !mapTransaction.loggedNoImage) {
@@ -752,6 +755,7 @@
       quantity:        getV(tx, 'quantity', 'quantity') || 1,
       price,
       variations:      variationStr,
+      color,
       imageUrl,
       personalization: orderCtx.buyerNote,
       customOptions,
