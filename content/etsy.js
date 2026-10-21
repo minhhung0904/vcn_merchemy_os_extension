@@ -1026,11 +1026,19 @@
     return { match, buyerMap: capturedBuyersMap };
   }
 
+  // Flow Studio reads the shop name from the page itself so it doesn't depend
+  // on the order-sync settings (defaultStore).
+  function detectShopNameFromPage() {
+    for (const s of document.querySelectorAll('script')) {
+      const m = s.textContent.match(/"shop_name"\s*:\s*"([^"]+)"/);
+      if (m) return m[1];
+    }
+    return '';
+  }
+
   async function handlePushOrderToFlow(orderId) {
     try {
-      const { defaultStore } = await new Promise((res) =>
-        chrome.storage.local.get(['defaultStore'], res)
-      );
+      const defaultStore = detectShopNameFromPage();
 
       const found = await findEtsyOrderById(orderId);
       if (!found) {
@@ -1038,26 +1046,21 @@
       }
 
       const mapped = mapOrder(found.match, found.buyerMap, defaultStore);
-      // Custom text = per-item personalization answers + order-level buyer/seller notes.
-      const items = mapped.items || [];
+      // Personalization answers are already part of each item's variation
+      // lines. The buyer's note and seller's private notes are order-level.
       const customLines = [];
-      items.forEach((item, i) => {
-        if (item.customOptions) {
-          const label = items.length > 1 ? `Item ${i + 1} (${item.name})` : 'Personalization';
-          customLines.push(`${label}: ${item.customOptions.replace(/ \| /g, '\n  ')}`);
-        }
-      });
       if (mapped.buyerNote) customLines.push(`Buyer note: ${mapped.buyerNote}`);
       (mapped.privateNotes || []).forEach((n) => customLines.push(`Seller note: ${n}`));
       const fileUrls = await getPersonalizationFileUrls(orderId);
       const customText = customLines.join('\n');
       const storeName = defaultStore || '';
       const products = (mapped.items || []).map((item) => {
-        const parts = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
-        if (item.sku) parts.push(`SKU: ${item.sku}`);
-        if (item.variations) parts.push(item.variations);
-        if (item.imageUrl) parts.push(`Image: ${item.imageUrl}`);
-        return parts.join(' — ');
+        // One line per field, like Etsy's own order view.
+        const lines = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
+        if (item.imageUrl) lines.push(`Image: ${item.imageUrl}`);
+        if (item.sku) lines.push(`SKU: ${item.sku}`);
+        if (item.variations) lines.push(...item.variations.split(' | '));
+        return lines.join('\n');
       });
 
       window.__sellfernFlow.openPushModal({
@@ -1066,7 +1069,7 @@
         storeName,
         customText,
         products,
-        suggestedTitle: `${storeName ? storeName + ' – ' : ''}Order #${orderId}`,
+        titlePrefix: `#${orderId}`,
         attachmentUrls: fileUrls,
       });
     } catch (err) {

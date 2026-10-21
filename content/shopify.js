@@ -335,10 +335,9 @@
       const node = await findOrderNodeById(orderId);
       if (!node) throw new Error('Could not find this order in the captured order list. Try reloading the Orders page.');
 
-      const { shopifyStoreName } = await new Promise((res) =>
-        chrome.storage.local.get(['shopifyStoreName'], res)
-      );
-      const storeName = shopifyStoreName || '';
+      // Taken from the admin URL so Flow Studio doesn't depend on the
+      // order-sync store mapping (shopifyStoreName).
+      const storeName = (location.pathname.match(/\/store\/([^/]+)/) || [])[1] || '';
       // Best effort: Shopify order nodes carry no scraped personalization
       // field today (mapLineItems hardcodes it blank) — fall back to the
       // order's own note, if the captured query happens to include it.
@@ -351,11 +350,11 @@
         fulfillmentStatus: node.displayFulfillmentStatus || '',
       });
       const products = items.map((item) => {
-        const parts = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
-        if (item.sku) parts.push(`SKU: ${item.sku}`);
-        if (item.variations) parts.push(item.variations);
-        if (item.imageUrl) parts.push(`Image: ${item.imageUrl}`);
-        return parts.join(' — ');
+        const lines = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
+        if (item.imageUrl) lines.push(`Image: ${item.imageUrl}`);
+        if (item.sku) lines.push(`SKU: ${item.sku}`);
+        if (item.variations) lines.push(item.variations);
+        return lines.join('\n');
       });
 
       window.__sellfernFlow.openPushModal({
@@ -364,7 +363,7 @@
         storeName,
         customText,
         products,
-        suggestedTitle: `${storeName ? storeName + ' – ' : ''}${node.name || 'Order #' + orderId}`,
+        titlePrefix: node.name || `#${orderId}`,
       });
     } catch (err) {
       console.error('[Sellfern] Failed to prepare Flow Studio push:', err);

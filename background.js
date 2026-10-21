@@ -74,21 +74,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ─── Flow Studio ──────────────────────────────────────────────────────────────
 
 async function flowStudioFetch(path, options = {}) {
-  const { apiToken } = await getSettings();
-  if (!apiToken)
-    throw new Error("No API token configured. Please set it in the extension Settings.");
+  // Flow Studio has its own token, separate from the order-sync apiToken.
+  const { flowApiToken } = await new Promise((res) => chrome.storage.local.get(["flowApiToken"], res));
+  if (!flowApiToken)
+    throw new Error("No Flow Studio API token configured. Please set it in the extension Settings.");
 
   const res = await fetch(`${DEFAULT_API_URL}/flow-studio${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiToken,
+      "x-api-key": flowApiToken,
       ...(options.headers || {}),
     },
   });
 
   if (res.status === 401) {
-    throw new Error("Invalid or expired API token. Please update it in the extension Settings.");
+    throw new Error("Invalid or expired Flow Studio API token. Please update it in the extension Settings.");
   }
   if (res.status === 403) {
     throw new Error("You don't have access to this board in Sellfern yet — ask a teammate to add you in Flow Studio.");
@@ -110,20 +111,19 @@ async function handleGetFlowBoardDetail(boardId) {
   return flowStudioFetch(`/boards/${boardId}`, { method: "GET" });
 }
 
-async function handleCreateFlowCard({ boardId, columnId, title, orderId, platform, storeName, customText, products, attachmentUrls }) {
+async function handleCreateFlowCard({ boardId, columnId, title, orderId, platform, storeName, customText, products, description: editedDescription, attachmentUrls }) {
   if (!boardId) throw new Error("Please choose a board.");
   if (!columnId) throw new Error("Please choose a column.");
   if (!title || !title.trim()) throw new Error("Please enter a card title.");
 
-  const description = [
+  // The modal sends the (editable) description it showed; fall back to building it.
+  const description = editedDescription || [
     `Order ID: ${orderId || ""}`,
     `Store: ${storeName || ""}`,
     "",
     "Products:",
-    products?.length ? products.map((p) => `- ${p}`).join("\n") : "(none)",
-    "",
-    "Custom Text:",
-    customText || "(none)",
+    products?.length ? products.map((p) => `- ${String(p).split("\n").join("\n  ")}`).join("\n\n") : "(none)",
+    ...(customText ? ["", "Notes:", customText] : []),
   ].join("\n");
 
   return flowStudioFetch(`/boards/${boardId}/cards`, {

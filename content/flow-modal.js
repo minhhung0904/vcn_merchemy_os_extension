@@ -99,9 +99,47 @@
     document.removeEventListener('keydown', host.__onKeyDown);
   }
 
-  function openPushModal({ orderId, platform, storeName, customText, products, suggestedTitle, attachmentUrls }) {
+  const STORE_CODE_KEY = '__sellfern-flow-store-code';
+
+  function readStoreCode(storeName) {
+    try { return (JSON.parse(localStorage.getItem(STORE_CODE_KEY) || '{}'))[storeName || ''] || ''; }
+    catch (_) { return ''; }
+  }
+
+  function saveStoreCode(storeName, code) {
+    try {
+      const all = JSON.parse(localStorage.getItem(STORE_CODE_KEY) || '{}');
+      all[storeName || ''] = code;
+      localStorage.setItem(STORE_CODE_KEY, JSON.stringify(all));
+    } catch (_) { /* storage unavailable — code just won't be remembered */ }
+  }
+
+  // Same layout the card description is created with, so the textarea in the
+  // modal is exactly what lands on the card.
+  function buildDescription({ orderId, storeName, products, customText }) {
+    return [
+      `Order ID: ${orderId || ''}`,
+      `Store: ${storeName || ''}`,
+      '',
+      'Products:',
+      products && products.length
+        ? products.map((p) => `- ${String(p).split('\n').join('\n  ')}`).join('\n\n')
+        : '(none)',
+      ...(customText ? ['', 'Notes:', customText] : []),
+    ].join('\n');
+  }
+
+  function openPushModal({ orderId, platform, storeName, customText, products, titlePrefix, attachmentUrls }) {
     // Avoid stacking multiple modals if clicked twice.
     document.getElementById('__sellfern-flow-modal-host')?.remove();
+
+    let modalIconUrl = '';
+    try { modalIconUrl = chrome.runtime.getURL('icons/icon48.png'); } catch (_) { /* no icon */ }
+
+    titlePrefix = titlePrefix || `#${orderId || ''}`;
+    const attachments = attachmentUrls || [];
+    const savedStoreCode = readStoreCode(storeName);
+    const descriptionText = buildDescription({ orderId, storeName, products, customText });
 
     const host = document.createElement('div');
     host.id = '__sellfern-flow-modal-host';
@@ -114,46 +152,76 @@
     root.innerHTML = `
       <style>
         .backdrop { position: fixed; inset: 0; background: rgba(15, 15, 20, 0.5); display: flex; align-items: center; justify-content: center; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; }
-        .card { width: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(15,23,42,0.35); padding: 20px; }
-        h2 { margin: 0 0 4px; font-size: 16px; color: #16181d; }
-        .sub { margin: 0 0 16px; font-size: 12px; color: #6b7280; }
-        label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin: 12px 0 4px; }
-        select, input[type=text] { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 8px; color: #111827; }
-        .preview { max-height: 90px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; font-size: 12px; color: #374151; white-space: pre-wrap; }
+        .card { width: 720px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; background: #fff; border-radius: 16px; box-shadow: 0 20px 50px rgba(15,23,42,0.35); padding: 28px; }
+        h2 { margin: 0 0 4px; font-size: 20px; color: #16181d; }
+        .sub { margin: 0 0 20px; font-size: 14px; color: #6b7280; }
+        label { display: block; font-size: 14px; font-weight: 600; color: #374151; margin: 16px 0 6px; }
+        select, input[type=text] { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px; border: 1px solid #cbd5e1; border-radius: 8px; color: #111827; }
+        .preview { max-height: 160px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #374151; white-space: pre-wrap; }
+        .title { display: flex; align-items: center; gap: 10px; }
+        .brand-icon { width: 30px; height: 30px; border-radius: 7px; flex: none; }
+        .brand-name { color: #0d9488; }
+        .combo { position: relative; }
+        .combo-btn { width: 100%; box-sizing: border-box; text-align: left; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #111827; padding: 10px 32px 10px 12px; font-size: 15px; font-weight: 400; position: relative; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .combo-btn::after { content: '▾'; position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #6b7280; }
+        .combo-panel { position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 10px 28px rgba(15,23,42,0.22); padding: 8px; }
+        .combo-panel[hidden] { display: none; }
+        .combo-list { max-height: 240px; overflow: auto; margin-top: 6px; }
+        .combo-item { padding: 9px 10px; font-size: 15px; color: #111827; border-radius: 6px; cursor: pointer; }
+        .combo-item:hover { background: #f1f5f9; }
+        .combo-item.selected { background: #ccfbf1; font-weight: 600; }
+        .combo-empty { padding: 9px 10px; font-size: 14px; color: #6b7280; }
+        .title-row { display: flex; align-items: center; gap: 8px; }
+        .title-prefix { font-size: 15px; font-weight: 600; color: #111827; white-space: nowrap; }
+        .hint { margin-top: 6px; font-size: 13px; color: #6b7280; }
+        textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; font-family: inherit; font-size: 14px; line-height: 1.5; min-height: 260px; border: 1px solid #cbd5e1; border-radius: 8px; color: #111827; resize: vertical; }
         .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-        button { font-family: inherit; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 8px 18px; cursor: pointer; border: none; }
+        button { font-family: inherit; font-size: 15px; font-weight: 600; border-radius: 999px; padding: 10px 24px; cursor: pointer; border: none; }
         .btn-cancel { background: #f1f5f9; color: #475569; }
         .btn-submit { background: linear-gradient(180deg, #14b8a6, #0d9488); color: #fff; }
         .btn-submit:disabled { opacity: 0.6; cursor: default; }
-        .status { margin-top: 10px; font-size: 12px; }
+        .status { margin-top: 12px; font-size: 14px; }
         .status.error { color: #dc2626; }
         .status.success { color: #16a34a; }
-        .close { position: absolute; top: 14px; right: 16px; background: none; color: #9ca3af; font-size: 18px; padding: 0; line-height: 1; }
+        .close { position: absolute; top: 16px; right: 20px; background: none; color: #9ca3af; font-size: 26px; padding: 0; line-height: 1; }
       </style>
       <div class="backdrop">
         <div class="card" style="position: relative;">
           <button class="close" data-action="close">&times;</button>
-          <h2>Push to Flow Studio</h2>
+          <h2 class="title">
+            ${modalIconUrl ? `<img class="brand-icon" src="${modalIconUrl}" alt="" />` : ''}
+            <span>Push to Flow Studio <span class="brand-name">Sellfern</span></span>
+          </h2>
           <p class="sub">Order #${escapeHtml(orderId || '')}${storeName ? ' · ' + escapeHtml(storeName) : ''}</p>
 
           <label>Board</label>
-          <select data-field="board"><option>Loading boards…</option></select>
+          <div class="combo">
+            <button type="button" class="combo-btn" data-field="boardBtn">Loading boards…</button>
+            <div class="combo-panel" data-field="boardPanel" hidden>
+              <input type="text" data-field="boardSearch" placeholder="Search boards…" autocomplete="off" />
+              <div class="combo-list" data-field="boardList"></div>
+            </div>
+          </div>
 
           <label>Column</label>
           <select data-field="column"><option>Select a board first</option></select>
 
           <label>Card title</label>
-          <input type="text" data-field="title" value="${escapeHtml(suggestedTitle || '')}" />
+          <div class="title-row">
+            <span class="title-prefix">${escapeHtml(titlePrefix)}</span>
+            <input type="text" data-field="storeCode" placeholder="Store code (e.g. AZ)" value="${escapeHtml(savedStoreCode)}" />
+          </div>
+          <div class="hint">Card title: <b data-field="titlePreview"></b></div>
 
-          <label>Products</label>
+          <label>Description</label>
+          <textarea data-field="description" rows="12">${escapeHtml(descriptionText)}</textarea>
+
+          <label>Attachments${attachments.length ? ' (' + attachments.length + ')' : ''}</label>
           <div class="preview">${
-            (products && products.length)
-              ? products.map((p) => linkify(p)).join('<br/>')
-              : '<em>No product details found for this order.</em>'
+            attachments.length
+              ? attachments.map((u) => linkify(u)).join('\n')
+              : '<em>No attachments found for this order.</em>'
           }</div>
-
-          <label>Custom Text (personalization)</label>
-          <div class="preview">${escapeHtml(customText) || '<em>No personalization text found for this order.</em>'}</div>
 
           <div class="status" data-field="status"></div>
 
@@ -165,9 +233,18 @@
       </div>
     `;
 
-    const boardSelect = root.querySelector('[data-field="board"]');
+    const boardBtn = root.querySelector('[data-field="boardBtn"]');
+    const boardPanel = root.querySelector('[data-field="boardPanel"]');
+    const boardList = root.querySelector('[data-field="boardList"]');
+    let boardId = '';
     const columnSelect = root.querySelector('[data-field="column"]');
-    const titleInput = root.querySelector('[data-field="title"]');
+    const storeCodeInput = root.querySelector('[data-field="storeCode"]');
+    const titlePreview = root.querySelector('[data-field="titlePreview"]');
+    const descriptionInput = root.querySelector('[data-field="description"]');
+    const buildTitle = () => `${titlePrefix}${storeCodeInput.value.trim()}`;
+    const updateTitlePreview = () => { titlePreview.textContent = buildTitle(); };
+    storeCodeInput.addEventListener('input', updateTitlePreview);
+    updateTitlePreview();
     const statusEl = root.querySelector('[data-field="status"]');
     const submitBtn = root.querySelector('[data-action="submit"]');
 
@@ -186,30 +263,75 @@
     host.__onKeyDown = (e) => { if (e.key === 'Escape') closeModal(host); };
     document.addEventListener('keydown', host.__onKeyDown);
 
-    // Load boards.
-    chrome.runtime.sendMessage({ type: 'GET_FLOW_BOARDS' }, (res) => {
+    const boardSearch = root.querySelector('[data-field="boardSearch"]');
+    let allBoards = [];
+
+    function renderBoardList() {
+      const q = boardSearch.value.trim().toLowerCase();
+      const shown = allBoards.filter((b) => !q || (b.title || '').toLowerCase().includes(q));
+      boardList.innerHTML = shown.length
+        ? shown.map((b) =>
+            `<div class="combo-item${b.id === boardId ? ' selected' : ''}" data-id="${b.id}">${escapeHtml(b.title || 'Untitled board')}</div>`
+          ).join('')
+        : '<div class="combo-empty">No boards match</div>';
+    }
+
+    function selectBoard(id) {
+      const board = allBoards.find((b) => b.id === id);
+      if (!board) return;
+      const changed = id !== boardId;
+      boardId = id;
+      boardBtn.textContent = board.title || 'Untitled board';
+      if (changed) loadColumnsForBoard(id);
+    }
+
+    function closeBoardPanel() { boardPanel.hidden = true; }
+
+    boardBtn.addEventListener('click', () => {
+      if (!boardPanel.hidden) return closeBoardPanel();
+      if (!allBoards.length) return;
+      boardSearch.value = '';
+      renderBoardList();
+      boardPanel.hidden = false;
+      boardSearch.focus();
+    });
+    boardSearch.addEventListener('input', renderBoardList);
+    boardList.addEventListener('click', (e) => {
+      const item = e.target.closest('.combo-item');
+      if (!item) return;
+      selectBoard(item.dataset.id);
+      closeBoardPanel();
+    });
+    // Click anywhere else in the modal closes the list.
+    root.addEventListener('click', (e) => {
+      if (!e.target.closest('.combo')) closeBoardPanel();
+    });
+
+    // Load boards (the default board from Settings goes first when it exists).
+    chrome.runtime.sendMessage({ type: 'GET_FLOW_BOARDS' }, async (res) => {
       if (chrome.runtime.lastError) {
-        boardSelect.innerHTML = '<option>Failed to load boards</option>';
+        boardBtn.textContent = 'Failed to load boards';
         setStatus(chrome.runtime.lastError.message, 'error');
         return;
       }
       if (!res?.ok) {
-        boardSelect.innerHTML = '<option>Failed to load boards</option>';
+        boardBtn.textContent = 'Failed to load boards';
         setStatus(res?.error || 'Failed to load boards.', 'error');
         return;
       }
       const boards = res.boards || [];
       if (!boards.length) {
-        boardSelect.innerHTML = '<option value="">No boards found</option>';
+        boardBtn.textContent = 'No boards found';
         return;
       }
-      boardSelect.innerHTML = boards
-        .map((b) => `<option value="${b.id}">${escapeHtml(b.title || 'Untitled board')}</option>`)
-        .join('');
-      loadColumnsForBoard(boardSelect.value);
+      let defaultBoardId = '';
+      try {
+        defaultBoardId = (await chrome.storage.local.get(['flowDefaultBoardId'])).flowDefaultBoardId || '';
+      } catch (_) { /* no default — list as-is */ }
+      const defaultBoard = boards.find((b) => String(b.id) === String(defaultBoardId));
+      allBoards = defaultBoard ? [defaultBoard, ...boards.filter((b) => b !== defaultBoard)] : boards;
+      selectBoard(allBoards[0].id); // default board (if any) is first
     });
-
-    boardSelect.addEventListener('change', () => loadColumnsForBoard(boardSelect.value));
 
     function loadColumnsForBoard(boardId) {
       if (!boardId) return;
@@ -231,20 +353,20 @@
     }
 
     submitBtn.addEventListener('click', () => {
-      const boardId = boardSelect.value;
       const columnId = columnSelect.value;
-      const title = titleInput.value;
+      const title = buildTitle();
 
       if (!boardId) return setStatus('Please choose a board.', 'error');
       if (!columnId) return setStatus('Please choose a column.', 'error');
-      if (!title.trim()) return setStatus('Please enter a card title.', 'error');
 
+      saveStoreCode(storeName, storeCodeInput.value.trim());
       submitBtn.disabled = true;
       setStatus('Creating card…');
 
       chrome.runtime.sendMessage({
         type: 'CREATE_FLOW_CARD',
-        boardId, columnId, title, orderId, platform, storeName, customText, products, attachmentUrls,
+        boardId, columnId, title, orderId, platform, storeName, customText, products,
+        description: descriptionInput.value, attachmentUrls: attachments,
       }, (res) => {
         submitBtn.disabled = false;
         if (chrome.runtime.lastError || !res?.ok) {
@@ -278,14 +400,11 @@
     if (/not been loaded by the Orders page/i.test(msg)) {
       return msg;
     }
-    if (/no api token configured/i.test(msg)) {
-      return 'No Sellfern API token is set. Open the extension Settings and add one, then try again.';
+    if (/no flow studio api token/i.test(msg)) {
+      return 'No Flow Studio API token is set. Open the extension Settings, add one under "Flow Studio API Token", then try again.';
     }
-    if (/invalid or expired api token/i.test(msg)) {
-      return 'Your Sellfern API token is invalid or has expired. Update it in the extension Settings and try again.';
-    }
-    if (/not in this organization|contact your admin/i.test(msg)) {
-      return msg;
+    if (/invalid or expired flow studio api token/i.test(msg)) {
+      return 'Your Flow Studio API token is invalid or has expired. Update it in the extension Settings and try again.';
     }
 
     return "This order's details could not be read. Please reload the Orders page (F5) and try again — if it keeps happening, check the browser console for the underlying error.";

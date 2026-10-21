@@ -346,6 +346,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   bindSettingsEvents();
+  bindFlowSettingsEvents();
   bindMainEvents();
   checkAuth();
 });
@@ -467,6 +468,7 @@ function openSettingsView() {
     }
     showView("settings");
   });
+  loadFlowSettings();
 }
 
 function bindSettingsEvents() {
@@ -617,6 +619,211 @@ function bindSettingsEvents() {
       getEl("set-save-status").textContent = "🗑 API Token removed.";
     });
   }
+}
+
+// ─── Flow Studio settings (independent of Order Sync) ────────────────────────
+// Own tab, own storage keys (flowApiToken, flowDefaultBoardId). View mode shows
+// what is saved; Edit lets you change both the token and the default board.
+
+let flowTestedToken = null;
+let flowBoards = [];
+let flowSaved = { token: "", boardId: "" };
+let flowTestedOrg = "";
+
+function setFlowStatus(id, cls, text) {
+  const el = getEl(id);
+  if (!el) return;
+  el.className = (id === "flow-conn-status" ? "conn-status " : "save-status ") + cls;
+  el.textContent = text;
+}
+
+function showFlowMode(mode) {
+  getEl("flow-view-mode").style.display = mode === "view" ? "flex" : "none";
+  getEl("flow-edit-mode").style.display = mode === "edit" ? "flex" : "none";
+}
+
+function showSettingsTab(tab) {
+  document.querySelectorAll("[data-settings-tab]").forEach((b) =>
+    b.classList.toggle("active", b.dataset.settingsTab === tab));
+  getEl("settings-tab-sync").style.display = tab === "sync" ? "flex" : "none";
+  getEl("settings-tab-flow").style.display = tab === "flow" ? "flex" : "none";
+}
+
+// GET /flow-studio/boards with the given token → boards array (throws on failure).
+async function fetchFlowBoards(token) {
+  const res = await fetch(`${DEFAULT_API_URL}/flow-studio/boards`, {
+    method: "GET",
+    headers: { "x-api-key": token },
+  });
+  if (res.status === 401) throw new Error("Invalid or expired token.");
+  if (res.status === 403) throw new Error("This token has no access to Flow Studio.");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json().catch(() => ({}));
+  const boards = body.success ? body.data : body;
+  return Array.isArray(boards) ? boards : [];
+}
+
+// GET /flow-studio/me → organization name the token belongs to ("" if unavailable).
+async function fetchFlowOrgName(token) {
+  try {
+    const res = await fetch(`${DEFAULT_API_URL}/flow-studio/me`, { headers: { "x-api-key": token } });
+    if (!res.ok) return "";
+    const body = await res.json().catch(() => ({}));
+    return ((body.success ? body.data : body)?.organization_name || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function renderFlowBoardOptions(boards, selectedId) {
+  const select = getEl("flow-default-board");
+  select.innerHTML = '<option value="">No default board</option>';
+  boards.forEach((b) => {
+    const opt = document.createElement("option");
+    opt.value = String(b.id);
+    opt.textContent = b.title || "Untitled board";
+    select.appendChild(opt);
+  });
+  // A saved board that no longer exists falls back to "No default board".
+  const match = boards.find((b) => String(b.id) === String(selectedId));
+  select.value = match ? String(match.id) : "";
+  select.disabled = false;
+}
+
+function renderFlowViewMode(token, boardName, orgName) {
+  getEl("flow-view-org").textContent = orgName || "your organization";
+  getEl("flow-view-token-mask").textContent = maskToken(token);
+  getEl("flow-view-board").textContent = boardName || "No default board";
+  showFlowMode("view");
+}
+
+async function loadFlowSettings() {
+  const { flowApiToken, flowDefaultBoardId, flowDefaultBoardName, flowOrgName } =
+    await storage.get(["flowApiToken", "flowDefaultBoardId", "flowDefaultBoardName", "flowOrgName"]);
+  flowSaved = { token: flowApiToken || "", boardId: flowDefaultBoardId || "" };
+  if (flowSaved.token) renderFlowViewMode(flowSaved.token, flowDefaultBoardName, flowOrgName);
+  else enterFlowEditMode("");
+}
+
+// Opens the editor. With an existing token it is re-validated right away so the
+// board list is available without pressing Test Connection first.
+async function enterFlowEditMode(token) {
+  const input = getEl("flow-api-token");
+  input.value = token || "";
+  input.type = "password";
+  getEl("flow-btn-token-eye").textContent = "👁";
+  getEl("flow-btn-cancel").style.display = flowSaved.token ? "" : "none";
+  setFlowStatus("flow-conn-status", "", "");
+  setFlowStatus("flow-save-status", "", "");
+  flowTestedToken = null;
+  flowBoards = [];
+  const select = getEl("flow-default-board");
+  select.innerHTML = '<option value="">No default board</option>';
+  select.disabled = true;
+  getEl("flow-btn-save").disabled = true;
+  showFlowMode("edit");
+  if (token) await testFlowConnection(token, flowSaved.boardId);
+}
+
+async function testFlowConnection(token, selectedBoardId) {
+  setFlowStatus("flow-conn-status", "loading", "⏳ Testing…");
+  getEl("flow-btn-save").disabled = true;
+  try {
+    const [boards, orgName] = await Promise.all([fetchFlowBoards(token), fetchFlowOrgName(token)]);
+    flowBoards = boards;
+    flowTestedToken = token;
+    flowTestedOrg = orgName;
+    renderFlowBoardOptions(flowBoards, selectedBoardId);
+    setFlowStatus("flow-conn-status", "ok", `🟢 Connected — ${orgName || "your organization"}`);
+    getEl("flow-btn-save").disabled = false;
+  } catch (err) {
+    flowTestedToken = null;
+    flowTestedOrg = "";
+    flowBoards = [];
+    const select = getEl("flow-default-board");
+    select.innerHTML = '<option value="">No default board</option>';
+    select.disabled = true;
+    setFlowStatus("flow-conn-status", "err", `🔴 ${err.message || "Connection failed."}`);
+  }
+}
+
+function bindFlowSettingsEvents() {
+  const input = getEl("flow-api-token");
+  if (!input) return;
+
+  document.querySelectorAll("[data-settings-tab]").forEach((btn) =>
+    btn.addEventListener("click", () => showSettingsTab(btn.dataset.settingsTab)));
+
+  getEl("flow-btn-edit").addEventListener("click", () => enterFlowEditMode(flowSaved.token));
+
+  getEl("flow-btn-cancel").addEventListener("click", () => loadFlowSettings());
+
+  getEl("flow-btn-token-eye").addEventListener("click", () => {
+    const hidden = input.type === "password";
+    input.type = hidden ? "text" : "password";
+    getEl("flow-btn-token-eye").textContent = hidden ? "🙈" : "👁";
+  });
+
+  // Editing the token invalidates the last test (and the board list tied to it).
+  input.addEventListener("input", () => {
+    const token = input.value.trim();
+    if (token !== flowTestedToken) {
+      getEl("flow-btn-save").disabled = true;
+      const select = getEl("flow-default-board");
+      select.disabled = true;
+      setFlowStatus("flow-conn-status", "", token ? "Test connection to enable Save." : "");
+      setFlowStatus("flow-save-status", "", "");
+    }
+  });
+
+  getEl("flow-btn-test").addEventListener("click", async () => {
+    const token = input.value.trim();
+    if (!token) {
+      setFlowStatus("flow-conn-status", "err", "🔴 Please enter a Flow Studio token first.");
+      return;
+    }
+    const current = getEl("flow-default-board").value;
+    await testFlowConnection(token, current || flowSaved.boardId);
+  });
+
+  getEl("flow-btn-save").addEventListener("click", async () => {
+    const token = input.value.trim();
+    if (!token || token !== flowTestedToken) {
+      setFlowStatus("flow-save-status", "err", "⚠️ Test connection successfully before saving.");
+      getEl("flow-btn-save").disabled = true;
+      return;
+    }
+    const boardId = getEl("flow-default-board").value;
+    const board = flowBoards.find((b) => String(b.id) === boardId);
+    await storage.set({ flowApiToken: token, flowOrgName: flowTestedOrg });
+    if (board) await storage.set({ flowDefaultBoardId: board.id, flowDefaultBoardName: board.title || "Untitled board" });
+    else await storage.remove(["flowDefaultBoardId", "flowDefaultBoardName"]);
+    await loadFlowSettings();
+    setFlowStatus("flow-save-status", "", "");
+  });
+
+  const btnRemove = getEl("flow-btn-remove");
+  let armed = false;
+  let timer = null;
+  const reset = () => {
+    armed = false;
+    if (timer) clearTimeout(timer);
+    btnRemove.classList.remove("confirm");
+    btnRemove.textContent = "🗑 Remove Flow Studio Token";
+  };
+  btnRemove.addEventListener("click", async () => {
+    if (!armed) {
+      armed = true;
+      btnRemove.classList.add("confirm");
+      btnRemove.textContent = "⚠️ Click again to confirm";
+      timer = setTimeout(reset, 3000);
+      return;
+    }
+    reset();
+    await storage.remove(["flowApiToken", "flowOrgName", "flowDefaultBoardId", "flowDefaultBoardName"]);
+    await loadFlowSettings();
+    setFlowStatus("flow-save-status", "", "🗑 Flow Studio token removed.");
+  });
 }
 
 // ─── Logging Utility ────────────────────────────────────────────────────────
