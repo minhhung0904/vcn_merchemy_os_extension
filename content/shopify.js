@@ -65,15 +65,26 @@
       credentials: 'include',
       headers: { Accept: 'application/json' },
     });
-    if (!res.ok) throw new Error(`Shopify internal API error ${res.status}`);
+    if (!res.ok) {
+      console.error('[Sellfern][Shopify] Page fetch failed:', res.status, res.statusText, url.slice(0, 300));
+      throw new Error(`Shopify internal API error ${res.status}`);
+    }
     const json = await res.json();
-    if (!json?.data?.ordersList) throw new Error('Unexpected OrderListData response shape.');
+    if (!json?.data?.ordersList) {
+      console.error('[Sellfern][Shopify] Unexpected OrderListData shape:', {
+        topKeys: Object.keys(json || {}),
+        dataKeys: Object.keys(json?.data || {}),
+        errors: json?.errors,
+      });
+      throw new Error('Unexpected OrderListData response shape.');
+    }
     return json.data.ordersList;
   }
 
   // ─── Aggregate all pages ──────────────────────────────────────────────────
 
   async function fetchAllOrders(onProgress) {
+    console.log('[Sellfern][Shopify] fetchAllOrders start. template captured =', !!capturedTemplate, 'url =', location.href);
     if (!capturedTemplate) {
       throw new Error(
         'No live Shopify order query captured yet. Please open/reload this store\'s Orders page ' +
@@ -267,10 +278,18 @@
       });
 
       const filtered = filterNodes(nodes, message.filters);
+      console.log('[Sellfern][Shopify] Scrape result:', {
+        fetched: nodes.length,
+        afterFilter: filtered.length,
+        filters: message.filters,
+        storeName: message.storeName,
+        sampleStatuses: nodes.slice(0, 5).map((n) => [n.displayFinancialStatus, n.displayFulfillmentStatus, deriveOrderStatus(n)]),
+      });
       const orders = filtered.map((n) => mapOrder(n, message.storeName));
 
       sendResponse({ ok: true, orders, count: orders.length, total: orders.length });
     } catch (err) {
+      console.error('[Sellfern][Shopify] Scrape failed:', err);
       sendResponse({ ok: false, error: err.message });
     }
   }

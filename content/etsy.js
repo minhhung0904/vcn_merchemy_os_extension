@@ -438,7 +438,14 @@
       credentials: 'include',
       headers: headers,
     });
-    if (!res.ok) throw new Error(`Etsy API error ${res.status}: ${res.statusText}`);
+    if (!res.ok) {
+      const body = await res.clone().text().catch(() => '');
+      console.error('[Sellfern][Etsy] Order page fetch failed:', {
+        status: res.status, statusText: res.statusText, shopId, offset, limit,
+        url: url.toString().slice(0, 300), body: body.slice(0, 300),
+      });
+      throw new Error(`Etsy API error ${res.status}: ${res.statusText}`);
+    }
     return res.json();
   }
 
@@ -527,9 +534,13 @@
     do {
       const data = await fetchOrderPage(shopId, offset, limit, ctx);
       const search = data?.orders_search || data?.ordersSearch;
-      if (!search) throw new Error('Unexpected API response structure.');
+      if (!search) {
+        console.error('[Sellfern][Etsy] Unexpected response structure:', { shopId, offset, topKeys: Object.keys(data || {}), data: JSON.stringify(data).slice(0, 300) });
+        throw new Error('Unexpected API response structure.');
+      }
 
       if (totalCount === null) totalCount = getV(search, 'total_count', 'totalCount') || 0;
+      console.log('[Sellfern][Etsy] Page fetched:', { shopId, offset, got: search.orders?.length ?? 0, totalCount, orderStateId: options.orderStateId });
 
       rawOrders.push(...(search.orders || []));
 

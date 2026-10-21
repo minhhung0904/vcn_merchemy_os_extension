@@ -28,10 +28,20 @@
     let json;
     try {
       json = JSON.parse(jsonText);
-    } catch (_) {
+    } catch (e) {
+      console.warn('[Sellfern][Shopify] OrderListData response is not valid JSON:', url, e.message, String(jsonText).slice(0, 200));
       return;
     }
-    if (!json?.data?.ordersList) return;
+    if (!json?.data?.ordersList) {
+      console.warn('[Sellfern][Shopify] OrderListData response has no data.ordersList.', {
+        url,
+        topKeys: Object.keys(json || {}),
+        dataKeys: Object.keys(json?.data || {}),
+        errors: json?.errors,
+      });
+      return;
+    }
+    console.log('[Sellfern][Shopify] Captured OrderListData:', json.data.ordersList.edges?.length ?? 0, 'orders, hasNextPage =', json.data.ordersList.pageInfo?.hasNextPage, url);
 
     let variables = null;
     try {
@@ -57,11 +67,16 @@
     const url = typeof input === 'string' ? input : input?.url || '';
     const res = await origFetch.apply(this, arguments);
 
+    if (url.includes('OrderListData')) {
+      console.log('[Sellfern][Shopify] Saw OrderListData request:', res.status, url);
+    }
     if (url.includes('/api/operations/') && url.includes('OrderListData')) {
       try {
         const text = await res.clone().text();
         tryCaptureOrderListData(url, text);
-      } catch (_) {}
+      } catch (e) {
+        console.warn('[Sellfern][Shopify] Failed to read OrderListData response:', e.message);
+      }
     }
     return res;
   };
