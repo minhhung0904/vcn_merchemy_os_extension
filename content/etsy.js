@@ -998,33 +998,24 @@
     console.log('[Sellfern][Flow] personalization-files (captured):', data);
 
     // Etsy returns the same upload in several sizes (il_75x75.<id>.jpg,
-    // il_fullxfull.<id>.jpg, ...). Collapse those variants into one entry per
-    // file (keyed by the file id after the size token, ignoring host/path/
-    // query), keeping the largest one. Each URL also remembers the nearest
+    // il_fullxfull.<id>.jpg, ...). Each URL also remembers the nearest
     // transaction/listing id found among its ancestors so it can be matched
     // to an order item.
-    const SIZE_RE = /il_(fullxfull|\d+x(?:\d+|N))\./;
-    const sizeScore = (u) => {
-      const m = u.match(SIZE_RE);
-      if (!m) return 0;
-      if (m[1] === 'fullxfull') return Infinity;
-      const [w, h] = m[1].split('x');
-      return Number(w) * (h === 'N' ? Number(w) : Number(h));
-    };
-    const fileKey = (u) => {
-      const clean = u.split(/[?#]/)[0];
-      const m = clean.match(/il_(?:fullxfull|\d+x(?:\d+|N))\.(.+)$/);
-      return m ? m[1] : clean;
-    };
+    // Every Etsy image URL is first rewritten to its fullxfull form, then
+    // exact duplicates are dropped (first occurrence wins, keeping Etsy's order).
+    // Any "<prefix>_<size>." filename (personalization uploads use "ipf_",
+    // listing photos "il_", others may exist), so the prefix isn't hardcoded.
+    const SIZE_RE = /\/([a-z]+)_(?:fullxfull|\d+x(?:\d+|N))\.(?=[^/]*$)/i;
+    const toFullSize = (u) => u.split(/([?#])/).map((part, i) => (i === 0 ? part.replace(SIZE_RE, '/$1_fullxfull.') : part)).join('');
     const byFile = new Map();
     let rawCount = 0;
     (function walk(v, ctx) {
       if (typeof v === 'string') {
         if (!/^https?:\/\//.test(v)) return;
         rawCount++;
-        const key = fileKey(v);
-        const prev = byFile.get(key);
-        if (!prev || sizeScore(v) > sizeScore(prev.url)) byFile.set(key, { url: v, ctx: prev?.ctx || ctx });
+        const url = toFullSize(v);
+        const key = url.split(/[?#]/)[0];
+        if (!byFile.has(key)) byFile.set(key, { url, ctx });
       }
       else if (Array.isArray(v)) v.forEach((x) => walk(x, ctx));
       else if (v && typeof v === 'object') {
