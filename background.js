@@ -111,7 +111,7 @@ async function handleGetFlowBoardDetail(boardId) {
   return flowStudioFetch(`/boards/${boardId}`, { method: "GET" });
 }
 
-async function handleCreateFlowCard({ boardId, columnId, title, orderId, platform, storeName, customText, products, description: editedDescription, attachmentUrls }) {
+async function handleCreateFlowCard({ boardId, columnId, title, orderId, platform, storeName, customText, products, description: editedDescription, attachmentUrls, attachmentNames }) {
   if (!boardId) throw new Error("Please choose a board.");
   if (!columnId) throw new Error("Please choose a column.");
   if (!title || !title.trim()) throw new Error("Please enter a card title.");
@@ -137,6 +137,8 @@ async function handleCreateFlowCard({ boardId, columnId, title, orderId, platfor
       // Backend downloads each link and re-hosts it on R2 as a real card
       // attachment.
       attachmentUrls: attachmentUrls || [],
+      // Parallel to attachmentUrls: suggested file names ("01_item1_<sku>.jpg").
+      attachmentNames: attachmentNames || [],
     }),
   });
 }

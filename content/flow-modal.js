@@ -129,7 +129,7 @@
     ].join('\n');
   }
 
-  function openPushModal({ orderId, platform, storeName, customText, products, titlePrefix, attachmentUrls }) {
+  function openPushModal({ orderId, platform, storeName, customText, products, titlePrefix, attachments: attachmentList, attachmentUrls }) {
     // Avoid stacking multiple modals if clicked twice.
     document.getElementById('__sellfern-flow-modal-host')?.remove();
 
@@ -137,7 +137,10 @@
     try { modalIconUrl = chrome.runtime.getURL('icons/icon48.png'); } catch (_) { /* no icon */ }
 
     titlePrefix = titlePrefix || `#${orderId || ''}`;
-    const attachments = attachmentUrls || [];
+    // [{ url, name }] in display order; plain URL lists (Shopify) get no name.
+    const attachmentItems = attachmentList || (attachmentUrls || []).map((url) => ({ url, name: '' }));
+    const attachments = attachmentItems.map((a) => a.url);
+    const attachmentNames = attachmentItems.map((a) => a.name);
     const savedStoreCode = readStoreCode(storeName);
     const descriptionText = buildDescription({ orderId, storeName, products, customText });
 
@@ -219,7 +222,7 @@
           <label>Attachments${attachments.length ? ' (' + attachments.length + ')' : ''}</label>
           <div class="preview">${
             attachments.length
-              ? attachments.map((u) => linkify(u)).join('\n')
+              ? attachmentItems.map((a, i) => `${i + 1}. ${a.name ? '<b>' + escapeHtml(a.name) + '</b>\n    ' : ''}${linkify(a.url)}`).join('\n')
               : '<em>No attachments found for this order.</em>'
           }</div>
 
@@ -366,7 +369,7 @@
       chrome.runtime.sendMessage({
         type: 'CREATE_FLOW_CARD',
         boardId, columnId, title, orderId, platform, storeName, customText, products,
-        description: descriptionInput.value, attachmentUrls: attachments,
+        description: descriptionInput.value, attachmentUrls: attachments, attachmentNames,
       }, (res) => {
         submitBtn.disabled = false;
         if (chrome.runtime.lastError || !res?.ok) {

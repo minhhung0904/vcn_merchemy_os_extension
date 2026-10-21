@@ -999,20 +999,47 @@
 
     // Etsy returns the same upload in several sizes (il_75x75.<id>.jpg,
     // il_fullxfull.<id>.jpg, ...). Collapse those variants into one entry per
-    // file, preferring the fullxfull one.
-    const SIZE_RE = /\/il_(?:\d+x(?:\d+|N)|fullxfull)\./;
+    // file (keyed by the file id after the size token, ignoring host/path/
+    // query), keeping the largest one. Each URL also remembers the nearest
+    // transaction/listing id found among its ancestors so it can be matched
+    // to an order item.
+    const SIZE_RE = /il_(fullxfull|\d+x(?:\d+|N))\./;
+    const sizeScore = (u) => {
+      const m = u.match(SIZE_RE);
+      if (!m) return 0;
+      if (m[1] === 'fullxfull') return Infinity;
+      const [w, h] = m[1].split('x');
+      return Number(w) * (h === 'N' ? Number(w) : Number(h));
+    };
+    const fileKey = (u) => {
+      const clean = u.split(/[?#]/)[0];
+      const m = clean.match(/il_(?:fullxfull|\d+x(?:\d+|N))\.(.+)$/);
+      return m ? m[1] : clean;
+    };
     const byFile = new Map();
-    (function walk(v) {
+    let rawCount = 0;
+    (function walk(v, ctx) {
       if (typeof v === 'string') {
         if (!/^https?:\/\//.test(v)) return;
-        const key = v.replace(SIZE_RE, '/il_SIZE.');
+        rawCount++;
+        const key = fileKey(v);
         const prev = byFile.get(key);
-        if (!prev || (v.includes('/il_fullxfull.') && !prev.includes('/il_fullxfull.'))) byFile.set(key, v);
+        if (!prev || sizeScore(v) > sizeScore(prev.url)) byFile.set(key, { url: v, ctx: prev?.ctx || ctx });
       }
-      else if (Array.isArray(v)) v.forEach(walk);
-      else if (v && typeof v === 'object') Object.values(v).forEach(walk);
-    })(data);
-    return Array.from(byFile.values());
+      else if (Array.isArray(v)) v.forEach((x) => walk(x, ctx));
+      else if (v && typeof v === 'object') {
+        const tx = getV(v, 'transaction_id', 'transactionId');
+        const listing = getV(v, 'listing_id', 'listingId');
+        const next = (tx != null || listing != null)
+          ? { transactionId: tx != null ? String(tx) : ctx?.transactionId, listingId: listing != null ? String(listing) : ctx?.listingId }
+          : ctx;
+        Object.values(v).forEach((x) => walk(x, next));
+      }
+    })(data, null);
+
+    const files = Array.from(byFile.values());
+    console.log('[Sellfern][Flow] attachments:', { rawUrls: rawCount, unique: files.length, files });
+    return files;
   }
 
   // Etsy has no AJAX endpoint that returns one order's full detail (confirmed
@@ -1062,17 +1089,36 @@
       const customLines = [];
       if (mapped.buyerNote) customLines.push(`Buyer note: ${mapped.buyerNote}`);
       (mapped.privateNotes || []).forEach((n) => customLines.push(`Seller note: ${n}`));
-      const fileUrls = await getPersonalizationFileUrls(orderId);
+      const files = await getPersonalizationFileUrls(orderId);
       const customText = customLines.join('\n');
       const storeName = defaultStore || '';
-      const products = (mapped.items || []).map((item) => {
+      const items = mapped.items || [];
+      const itemOf = (f) => items.findIndex((item) => f.ctx && (
+        (f.ctx.transactionId && f.ctx.transactionId === String(item.transactionId)) ||
+        (!f.ctx.transactionId && f.ctx.listingId && f.ctx.listingId === String(item.listingId))
+      ));
+      // In the order Etsy lists them, named after the item they belong to.
+      const slug = (s) => String(s || '').replace(/[\\/:*?"<>|#%]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+      const attachments = files.map((f, i) => {
+        const idx = itemOf(f);
+        const ext = (f.url.split(/[?#]/)[0].match(/\.(\w{2,5})$/) || [])[1] || 'jpg';
+        const label = idx >= 0
+          ? `item${idx + 1}_${slug(items[idx].sku || items[idx].name)}`
+          : 'unmatched';
+        return { url: f.url, name: `${String(i + 1).padStart(2, '0')}_${label}.${ext}`, itemIndex: idx };
+      });
+      const products = items.map((item, itemIdx) => {
         // One line per field, like Etsy's own order view.
         const lines = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
         if (item.imageUrl) lines.push(`Image: ${item.imageUrl}`);
         if (item.sku) lines.push(`SKU: ${item.sku}`);
         if (item.variations) lines.push(...item.variations.split(' | '));
+        // Attachments tied to this item by transaction/listing id.
+        attachments.filter((a) => a.itemIndex === itemIdx).forEach((a) => lines.push(`Attachment: ${a.name}`));
         return lines.join('\n');
       });
+      console.log('[Sellfern][Flow] attachment→item mapping:', files.map((f) => ({ url: f.url, ctx: f.ctx })),
+        'items:', items.map((i) => ({ tx: i.transactionId, listing: i.listingId })));
 
       window.__sellfernFlow.openPushModal({
         orderId,
@@ -1081,7 +1127,7 @@
         customText,
         products,
         titlePrefix: `#${orderId}`,
-        attachmentUrls: fileUrls,
+        attachments,
       });
     } catch (err) {
       console.error('[Sellfern] Failed to prepare Flow Studio push:', err);
