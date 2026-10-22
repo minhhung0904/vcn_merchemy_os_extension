@@ -1100,7 +1100,7 @@
       });
       const products = items.map((item, itemIdx) => {
         // One line per field, like Etsy's own order view.
-        const lines = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
+        const lines = [`Quantity: ${item.quantity || 1}`];
         if (item.imageUrl) lines.push(`Image: ${item.imageUrl}`);
         if (item.sku) lines.push(`SKU: ${item.sku}`);
         if (item.variations) lines.push(...item.variations.split(' | '));

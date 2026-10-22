@@ -369,7 +369,7 @@
         fulfillmentStatus: node.displayFulfillmentStatus || '',
       });
       const products = items.map((item) => {
-        const lines = [`${item.quantity || 1}x ${item.name || 'Unknown product'}`];
+        const lines = [`Quantity: ${item.quantity || 1}`];
         if (item.imageUrl) lines.push(`Image: ${item.imageUrl}`);
         if (item.sku) lines.push(`SKU: ${item.sku}`);
         if (item.variations) lines.push(item.variations);

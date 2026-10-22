@@ -117,13 +117,10 @@ async function handleCreateFlowCard({ boardId, columnId, title, orderId, platfor
   if (!title || !title.trim()) throw new Error("Please enter a card title.");
 
   // The modal sends the (editable) description it showed; fall back to building it.
+  const details = (products || []).map((p) => String(p)).filter(Boolean).join("\n\n");
   const description = editedDescription || [
-    `Order ID: ${orderId || ""}`,
-    `Store: ${storeName || ""}`,
-    "",
-    "Products:",
-    products?.length ? products.map((p) => `- ${String(p).split("\n").join("\n  ")}`).join("\n\n") : "(none)",
-    ...(customText ? ["", "Notes:", customText] : []),
+    details,
+    ...(customText ? [...(details ? [""] : []), "Notes:", customText] : []),
   ].join("\n");
 
   return flowStudioFetch(`/boards/${boardId}/cards`, {

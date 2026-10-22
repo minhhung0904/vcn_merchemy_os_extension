@@ -117,15 +117,10 @@
   // Same layout the card description is created with, so the textarea in the
   // modal is exactly what lands on the card.
   function buildDescription({ orderId, storeName, products, customText }) {
+    const details = (products || []).map((p) => String(p)).filter(Boolean).join('\n\n');
     return [
-      `Order ID: ${orderId || ''}`,
-      `Store: ${storeName || ''}`,
-      '',
-      'Products:',
-      products && products.length
-        ? products.map((p) => `- ${String(p).split('\n').join('\n  ')}`).join('\n\n')
-        : '(none)',
-      ...(customText ? ['', 'Notes:', customText] : []),
+      details,
+      ...(customText ? [...(details ? [''] : []), 'Notes:', customText] : []),
     ].join('\n');
   }
 
