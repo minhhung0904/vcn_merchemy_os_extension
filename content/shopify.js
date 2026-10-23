@@ -44,7 +44,6 @@
     if (data.type === 'ORDER_LIST_TEMPLATE') {
       capturedTemplate = data.payload;
       cacheNodes(capturedTemplate?.firstPage?.edges);
-      console.log('[Sellfern] Captured a live OrderListData template.', capturedTemplate?.base);
     }
   });
 
@@ -84,7 +83,6 @@
   // ─── Aggregate all pages ──────────────────────────────────────────────────
 
   async function fetchAllOrders(onProgress) {
-    console.log('[Sellfern][Shopify] fetchAllOrders start. template captured =', !!capturedTemplate, 'url =', location.href);
     if (!capturedTemplate) {
       throw new Error(
         'No live Shopify order query captured yet. Please open/reload this store\'s Orders page ' +
@@ -126,12 +124,6 @@
     // connection. Read defensively; fall back to one synthetic row so the
     // order still carries its total/quantity if per-item detail is absent.
     const edges = node.lineItems?.edges || node.lineItems?.nodes?.map((n) => ({ node: n })) || [];
-
-    if (!mapLineItems.logged) {
-      mapLineItems.logged = true;
-      console.log('[Sellfern][Shopify] Order node keys:', Object.keys(node));
-      console.log('[Sellfern][Shopify] First line item raw:', JSON.stringify(edges[0]?.node ?? null, null, 2));
-    }
 
     if (!edges.length) {
       return [{
@@ -278,13 +270,6 @@
       });
 
       const filtered = filterNodes(nodes, message.filters);
-      console.log('[Sellfern][Shopify] Scrape result:', {
-        fetched: nodes.length,
-        afterFilter: filtered.length,
-        filters: message.filters,
-        storeName: message.storeName,
-        sampleStatuses: nodes.slice(0, 5).map((n) => [n.displayFinancialStatus, n.displayFulfillmentStatus, deriveOrderStatus(n)]),
-      });
       const orders = filtered.map((n) => mapOrder(n, message.storeName));
 
       sendResponse({ ok: true, orders, count: orders.length, total: orders.length });
@@ -468,6 +453,4 @@
   }
 
   initFlowButtonInjector();
-
-  console.log('[Sellfern] Shopify unified-admin connector loaded.');
 })();

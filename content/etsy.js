@@ -79,7 +79,6 @@
     return null;
   }
 
-  let embeddedScanned = false;
   function ingestEmbeddedOrders() {
     let found = 0;
     for (const s of document.scripts) {
@@ -91,17 +90,11 @@
       let search = null;
       try { search = raw && JSON.parse(raw); } catch (_) {}
       if (!search || !Array.isArray(search.orders)) {
-        console.log('[Sellfern][Flow] orders_search found in a <script> but not parseable as JSON. Context:',
-          s.id || s.type || '(no id)', text.slice(Math.max(0, m.index - 60), m.index + 160));
         continue;
       }
       ingestOrders(search.orders, search.buyers);
       found += search.orders.length;
     }
-    if (!embeddedScanned || found) {
-      console.log('[Sellfern][Flow] embedded orders read from page scripts:', found);
-    }
-    embeddedScanned = true;
     return found;
   }
 
@@ -540,7 +533,6 @@
       }
 
       if (totalCount === null) totalCount = getV(search, 'total_count', 'totalCount') || 0;
-      console.log('[Sellfern][Etsy] Page fetched:', { shopId, offset, got: search.orders?.length ?? 0, totalCount, orderStateId: options.orderStateId });
 
       rawOrders.push(...(search.orders || []));
 
@@ -736,11 +728,6 @@
     const color = colorVariation ? colorVariation.value : '';
 
     const imageUrl = getItemImage(tx, product);
-    if (!imageUrl && !mapTransaction.loggedNoImage) {
-      mapTransaction.loggedNoImage = true;
-      console.log('[Sellfern][Etsy] No image found for item. tx keys:', Object.keys(tx), 'product keys:', Object.keys(product));
-      console.log('[Sellfern][Etsy] Raw transaction:', JSON.stringify(tx, null, 2));
-    }
 
     // SKU: use product_identifier (e.g. "VCN-CA-S2D0169-CTV")
     const sku = getV(product, 'product_identifier', 'productIdentifier') || '';
@@ -865,14 +852,12 @@
 
       while (hasMore) {
         if (cancelScrapeFlag) {
-          console.log('[Sellfern Scraper] Scrape cancelled.');
           break;
         }
         // Random delay (1.5s - 3.5s) to mimic human behavior
         await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 2000) + 1500));
 
         if (cancelScrapeFlag) {
-          console.log('[Sellfern Scraper] Scrape cancelled.');
           break;
         }
 
@@ -995,7 +980,6 @@
       await new Promise((r) => setTimeout(r, 200));
     }
     const data = capturedPersonalizationFiles.get(key);
-    console.log('[Sellfern][Flow] personalization-files (captured):', data);
 
     // Etsy returns the same upload in several sizes (il_75x75.<id>.jpg,
     // il_fullxfull.<id>.jpg, ...). Each URL also remembers the nearest
@@ -1008,11 +992,9 @@
     const SIZE_RE = /\/([a-z]+)_(?:fullxfull|\d+x(?:\d+|N))\.(?=[^/]*$)/i;
     const toFullSize = (u) => u.split(/([?#])/).map((part, i) => (i === 0 ? part.replace(SIZE_RE, '/$1_fullxfull.') : part)).join('');
     const byFile = new Map();
-    let rawCount = 0;
     (function walk(v, ctx) {
       if (typeof v === 'string') {
         if (!/^https?:\/\//.test(v)) return;
-        rawCount++;
         const url = toFullSize(v);
         const key = url.split(/[?#]/)[0];
         if (!byFile.has(key)) byFile.set(key, { url, ctx });
@@ -1029,7 +1011,6 @@
     })(data, null);
 
     const files = Array.from(byFile.values());
-    console.log('[Sellfern][Flow] attachments:', { rawUrls: rawCount, unique: files.length, files });
     return files;
   }
 
@@ -1108,8 +1089,6 @@
         attachments.filter((a) => a.itemIndex === itemIdx).forEach((a) => lines.push(`Attachment: ${a.name}`));
         return lines.join('\n');
       });
-      console.log('[Sellfern][Flow] attachment→item mapping:', files.map((f) => ({ url: f.url, ctx: f.ctx })),
-        'items:', items.map((i) => ({ tx: i.transactionId, listing: i.listingId })));
 
       window.__sellfernFlow.openPushModal({
         orderId,
@@ -1140,6 +1119,4 @@
   window.addEventListener('popstate', scheduleSync);
   syncDetailButton();
   ingestEmbeddedOrders();
-
-  console.log('[Sellfern Scraper] Etsy Mission Control API connector loaded.');
 })();

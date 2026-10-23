@@ -65,12 +65,10 @@
     const search = json?.orders_search || json?.ordersSearch;
     if (!search) return;
     if (!Array.isArray(search.orders)) {
-      console.log('[Sellfern][Etsy] orders_search without orders[] at', url, Object.keys(search));
       return;
     }
     const orders = search.orders || [];
     const buyers = search.buyers || [];
-    console.log('[Sellfern][Etsy] captured orders:', orders.length, 'from', url);
     orders.forEach((o) => {
       const id = o.order_id ?? o.orderId ?? o.receipt_id ?? o.receiptId;
       if (id != null) store.orders.set(String(id), o);
@@ -99,19 +97,10 @@
     post('PERSONALIZATION_FILES', { orderId: m[1], data: json });
   }
 
-  function logReq(method, url) {
-    try {
-      if (!url || !/\/api\//.test(url)) return;
-      console.log('[Sellfern][Etsy network]', method || 'GET', url);
-    } catch (_) {}
-  }
-
   // ─── Patch fetch ────────────────────────────────────────────────────────
   const origFetch = window.fetch;
   window.fetch = async function (input, init) {
-    const method = init?.method || (typeof input !== 'string' && input?.method) || 'GET';
     const url = typeof input === 'string' ? input : input?.url || '';
-    logReq(method, url);
     const res = await origFetch.apply(this, arguments);
 
     if (isOrdersListUrl(url)) {
@@ -133,7 +122,6 @@
   const origSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (method, url) {
     this.__sellfernUrl = url;
-    logReq(method, url);
     return origOpen.apply(this, arguments);
   };
   XMLHttpRequest.prototype.send = function (body) {
@@ -149,6 +137,4 @@
     }
     return origSend.apply(this, arguments);
   };
-
-  console.log('[Sellfern] Etsy orders-data sniffer installed.');
 })();

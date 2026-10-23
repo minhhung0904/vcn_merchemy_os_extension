@@ -41,8 +41,6 @@
       });
       return;
     }
-    console.log('[Sellfern][Shopify] Captured OrderListData:', json.data.ordersList.edges?.length ?? 0, 'orders, hasNextPage =', json.data.ordersList.pageInfo?.hasNextPage, url);
-
     let variables = null;
     try {
       const u = new URL(url);
@@ -67,9 +65,6 @@
     const url = typeof input === 'string' ? input : input?.url || '';
     const res = await origFetch.apply(this, arguments);
 
-    if (url.includes('OrderListData')) {
-      console.log('[Sellfern][Shopify] Saw OrderListData request:', res.status, url);
-    }
     if (url.includes('/api/operations/') && url.includes('OrderListData')) {
       try {
         const text = await res.clone().text();
@@ -97,6 +92,4 @@
     }
     return origSend.apply(this, arguments);
   };
-
-  console.log('[Sellfern] Shopify OrderListData sniffer installed.');
 })();

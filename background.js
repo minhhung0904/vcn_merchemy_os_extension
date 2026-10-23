@@ -251,7 +251,6 @@ async function setupSyncAlarm() {
   await chrome.alarms.clear("autoSync");
   
   if (autoSyncEnabled !== true) {
-    console.log("[Auto-Sync] Disabled by user.");
     return;
   }
   
@@ -274,7 +273,6 @@ async function setupSyncAlarm() {
       when: nextRun.getTime(),
       periodInMinutes: hours * 60
     });
-    console.log(`[Auto-Sync] Created periodic alarm for every ${hours} hours starting at ${nextRun.toLocaleString()}.`);
   } else {
     const timeStr = syncTime || "00:00";
     const [hh, mm] = timeStr.split(":").map(Number);
@@ -291,7 +289,6 @@ async function setupSyncAlarm() {
       when: nextRun.getTime(),
       periodInMinutes: 1440 // 24 hours
     });
-    console.log(`[Auto-Sync] Created daily alarm for ${nextRun.toLocaleString()} (${timeStr})`);
   }
 }
 
@@ -304,7 +301,6 @@ async function setupShopifySyncAlarm() {
   await chrome.alarms.clear("autoSyncShopify");
 
   if (shopifyAutoSyncEnabled !== true) {
-    console.log("[Auto-Sync] Shopify: disabled by user.");
     return;
   }
 
@@ -325,7 +321,6 @@ async function setupShopifySyncAlarm() {
       when: nextRun.getTime(),
       periodInMinutes: hours * 60
     });
-    console.log(`[Auto-Sync] Shopify: created periodic alarm for every ${hours} hours starting at ${nextRun.toLocaleString()}.`);
   } else {
     const timeStr = shopifySyncTime || "00:00";
     const [hh, mm] = timeStr.split(":").map(Number);
@@ -340,17 +335,14 @@ async function setupShopifySyncAlarm() {
       when: nextRun.getTime(),
       periodInMinutes: 1440
     });
-    console.log(`[Auto-Sync] Shopify: created daily alarm for ${nextRun.toLocaleString()} (${timeStr})`);
   }
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "autoSync") {
-    console.log("[Auto-Sync] Firing sync alarm...");
     const { shopId, defaultStore, autoSyncEnabled, orderStates, completedTimeframe } = await new Promise((res) => chrome.storage.local.get(["shopId", "defaultStore", "autoSyncEnabled", "orderStates", "completedTimeframe"], res));
-    
+
     if (autoSyncEnabled !== true) {
-      console.log("[Auto-Sync] Aborted. Auto-sync is disabled by user.");
       return;
     }
 
@@ -362,7 +354,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       let tabCreated = false;
 
       if (!tab) {
-        console.log("[Auto-Sync] No open Etsy tab found. Opening a background tab...");
         // Open to a safe Etsy URL
         tab = await chrome.tabs.create({ url: "https://www.etsy.com/your/shops/me/dashboard", active: false });
         tabCreated = true;
@@ -379,8 +370,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         // Give it a moment to stabilize/scripts to run
         await new Promise(r => setTimeout(r, 2000));
       }
-
-      console.log(`[Auto-Sync] Using tab ${tab.id} for scraping...`);
 
       // 2. Inject content script if not already there (safely handled by content/etsy.js guard)
       await chrome.scripting.executeScript({
@@ -400,7 +389,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       }
 
       if (!shopId || !targetOrderStateId) {
-        console.log("[Auto-Sync] Missing Shop ID or Order State ID. Attempting to detect on active tab...");
         try {
           // 1. Detect Shop Info
           const [shopResult] = await chrome.scripting.executeScript({
@@ -452,7 +440,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
               shopId = detectedShopId;
               defaultStore = detectedStoreName || defaultStore || "Etsy Shop";
               await chrome.storage.local.set({ shopId, defaultStore });
-              console.log("[Auto-Sync] Successfully auto-detected Shop ID:", shopId);
             }
           }
 
@@ -481,7 +468,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
                }
                
                await chrome.storage.local.set({ orderStates: updatedStates });
-               console.log("[Auto-Sync] Successfully auto-detected Order States.");
             }
           }
         } catch(e) {
@@ -521,14 +507,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       }
 
       const orders = response.orders || [];
-      console.log(`[Auto-Sync] Successfully scraped ${orders.length} orders. Pushing...`);
-      
+
       if (orders.length > 0) {
         const result = await handlePushOrders(orders);
-        console.log(`[Auto-Sync] Successfully pushed ${result.pushed} orders to Sellfern.`);
         await addSystemLog("success", `[Auto-Sync] Successfully fetched and pushed ${result.pushed} orders (New state).`);
       } else {
-        console.log(`[Auto-Sync] No new orders found.`);
         await addSystemLog("info", `[Auto-Sync] No new orders found (New state).`);
       }
     } catch (err) {
@@ -538,7 +521,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 
   if (alarm.name === "autoSyncShopify") {
-    console.log("[Auto-Sync] Firing Shopify sync alarm...");
     const { shopifyHandle, shopifyStoreName, shopifyAutoSyncEnabled, shopifyOrderState } = await new Promise((res) =>
       chrome.storage.local.get(
         ["shopifyHandle", "shopifyStoreName", "shopifyAutoSyncEnabled", "shopifyOrderState"], res
@@ -546,12 +528,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     );
 
     if (shopifyAutoSyncEnabled !== true) {
-      console.log("[Auto-Sync] Shopify: aborted, disabled by user.");
       return;
     }
 
     if (!shopifyHandle || !shopifyStoreName) {
-      console.log("[Auto-Sync] Shopify: missing store handle or Sellfern store mapping.");
       await addSystemLog("error", "[Auto-Sync] Shopify: missing store handle or Sellfern store mapping. Please configure it in the popup first.");
       return;
     }
@@ -565,12 +545,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       let needsLoadWait = false;
 
       if (!tab) {
-        console.log("[Auto-Sync] Shopify: no open tab found for this store. Opening a background tab...");
         tab = await chrome.tabs.create({ url: ordersUrl, active: false });
         tabCreated = true;
         needsLoadWait = true;
       } else if (!/\/orders(\?|$)/.test(tab.url || "")) {
-        console.log("[Auto-Sync] Shopify: existing tab isn't on the Orders page, navigating it there...");
         await chrome.tabs.update(tab.id, { url: ordersUrl });
         needsLoadWait = true;
       }
@@ -590,8 +568,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         // can fetch/paginate on its own.
         await new Promise((r) => setTimeout(r, 4000));
       }
-
-      console.log(`[Auto-Sync] Shopify: using tab ${tab.id} for scraping...`);
 
       // 2. Ask the content script to scrape using whatever it has captured.
       const filters = SHOPIFY_ORDER_STATES[shopifyOrderState] || SHOPIFY_ORDER_STATES.unfulfilled;
@@ -620,14 +596,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       }
 
       const orders = response.orders || [];
-      console.log(`[Auto-Sync] Shopify: successfully scraped ${orders.length} orders. Pushing...`);
 
       if (orders.length > 0) {
         const result = await handlePushOrders(orders);
-        console.log(`[Auto-Sync] Shopify: successfully pushed ${result.pushed} orders to Sellfern.`);
         await addSystemLog("success", `[Auto-Sync] Shopify: successfully fetched and pushed ${result.pushed} orders.`);
       } else {
-        console.log("[Auto-Sync] Shopify: no orders found.");
         await addSystemLog("info", "[Auto-Sync] Shopify: no orders found.");
       }
     } catch (err) {

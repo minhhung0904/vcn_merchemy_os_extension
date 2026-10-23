@@ -269,16 +269,16 @@
       const shown = allBoards.filter((b) => !q || (b.title || '').toLowerCase().includes(q));
       boardList.innerHTML = shown.length
         ? shown.map((b) =>
-            `<div class="combo-item${b.id === boardId ? ' selected' : ''}" data-id="${b.id}">${escapeHtml(b.title || 'Untitled board')}</div>`
+            `<div class="combo-item${String(b.id) === String(boardId) ? ' selected' : ''}" data-id="${b.id}">${escapeHtml(b.title || 'Untitled board')}</div>`
           ).join('')
         : '<div class="combo-empty">No boards match</div>';
     }
 
     function selectBoard(id) {
-      const board = allBoards.find((b) => b.id === id);
+      const board = allBoards.find((b) => String(b.id) === String(id));
       if (!board) return;
-      const changed = id !== boardId;
-      boardId = id;
+      const changed = String(id) !== String(boardId);
+      boardId = board.id;
       boardBtn.textContent = board.title || 'Untitled board';
       if (changed) loadColumnsForBoard(id);
     }
