@@ -487,7 +487,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
           storeName: defaultStore || "Etsy Shop",
           orderStateId: targetOrderStateId,
           orderStateLabel: targetOrderStateLabel,
-          timeframeValue: completedTimeframe || "last_90_days"
+          timeframeValue: completedTimeframe || "last_90_days",
+          dispatchDate: "all"
         }, (res) => {
           if (chrome.runtime.lastError) {
              resolve({ ok: false, error: chrome.runtime.lastError.message });

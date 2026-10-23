@@ -148,7 +148,7 @@
 
   // ─── Build API URL ────────────────────────────────────────────────────────────
 
-  function buildApiUrl(shopId, offset = 0, limit = DEFAULT_LIMIT, orderStateId = DEFAULT_ORDER_STATE, orderStateLabel = '', timeframeValue = 'last_90_days', searchTerms = '') {
+  function buildApiUrl(shopId, offset = 0, limit = DEFAULT_LIMIT, orderStateId = DEFAULT_ORDER_STATE, orderStateLabel = '', timeframeValue = 'last_90_days', searchTerms = '', dispatchDate = 'all') {
     let sortBy = 'ship_date';
     let sortOrder = 'desc';
     let completedDate = 'all';
@@ -172,7 +172,7 @@
       'filters[completed_status]': 'all',
       'filters[completed_date]': completedDate,
       'filters[destination]': 'all',
-      'filters[ship_date]': 'all',
+      'filters[ship_date]': isNew ? (dispatchDate || 'all') : 'all',
       'filters[shipping_label_eligibility]': 'false',
       'filters[shipping_label_status]': 'all',
       'filters[has_buyer_notes]': 'false',
@@ -405,8 +405,8 @@
   }
 
   async function fetchOrderPage(shopId, offset, limit, ctx) {
-    const { orderStateId, pageGuid, detectedLocale, orderStateLabel = '', timeframeValue = 'last_90_days', searchTerms = '' } = ctx;
-    const url = buildApiUrl(shopId, offset, limit, orderStateId, orderStateLabel, timeframeValue, searchTerms);
+    const { orderStateId, pageGuid, detectedLocale, orderStateLabel = '', timeframeValue = 'last_90_days', searchTerms = '', dispatchDate = 'all' } = ctx;
+    const url = buildApiUrl(shopId, offset, limit, orderStateId, orderStateLabel, timeframeValue, searchTerms, dispatchDate);
     const deviceHeaders = await getDeviceHeaders();
     // State-specific headers
     const isNew = orderStateLabel.toLowerCase().includes('new'); 
@@ -830,6 +830,7 @@
       const ctx = getDynamicContext(message.orderStateId || DEFAULT_ORDER_STATE);
       ctx.orderStateLabel = message.orderStateLabel || '';
       ctx.timeframeValue = message.timeframeValue || 'last_90_days';
+      ctx.dispatchDate = message.dispatchDate || 'all';
 
       // 2. Fetch one page first to get total count and first batch
       const firstPage = await fetchOrderPage(shopId, 0, DEFAULT_LIMIT, ctx);

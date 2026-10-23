@@ -3,6 +3,8 @@
 const DEFAULT_API_URL = window.DEFAULT_API_URL || "http://localhost:3000/api/v2";
 
 let scrapedOrders = [];
+let allScrapedOrders = [];
+let selectedOrderIds = new Set();
 let lastSavedSettings = {};
 let isCancelling = false;
 let currentAction = null;
@@ -1325,6 +1327,9 @@ function bindMainEvents() {
     storage.set({ orderStateId: e.target.value });
     const selectedOpt = e.target.options[e.target.selectedIndex];
     const isCompleted = selectedOpt && (selectedOpt.textContent.toLowerCase().includes("completed") || selectedOpt.textContent.toLowerCase().includes("finish"));
+    const isNew = selectedOpt && selectedOpt.textContent.toLowerCase().includes("new");
+    const dispatchGroup = getEl("dispatch-group");
+    if (dispatchGroup) dispatchGroup.style.display = isNew ? "block" : "none";
     const tfGroup = getEl("timeframe-group");
     if (tfGroup) {
       if (isCompleted && e.isTrusted) {
@@ -1338,6 +1343,34 @@ function bindMainEvents() {
   getEl("select-timeframe").addEventListener("change", (e) => {
     storage.set({ completedTimeframe: e.target.value });
   });
+
+  ["filter-date-from", "filter-date-to"].forEach((id) => {
+    const input = getEl(id);
+    input.addEventListener("input", () => {
+      formatDmyInput(input);
+      onOrderDateFilterChange();
+    });
+  });
+  // Clicking a date field opens the native calendar; the pick is written back as dd/mm/yyyy.
+  ["filter-date-from", "filter-date-to"].forEach((id) => {
+    const textInput = getEl(id);
+    const picker = getEl(`${id}-picker`);
+    textInput.addEventListener("click", () => {
+      picker.value = dmyToIso(textInput.value);
+      if (picker.showPicker) picker.showPicker();
+    });
+    picker.addEventListener("change", () => {
+      if (!picker.value) return;
+      textInput.value = isoToDmy(picker.value);
+      onOrderDateFilterChange();
+    });
+  });
+  document.querySelectorAll("[data-date-range]").forEach((btn) => {
+    btn.addEventListener("click", () => applyDateRange(btn.dataset.dateRange));
+  });
+  getEl("search-order").addEventListener("input", renderPreview);
+  getEl("select-all-orders").addEventListener("change", onSelectAllChange);
+  getEl("preview-body").addEventListener("change", onOrderCheckChange);
 
   // Persist auto-sync setting
   const toggleAutoSync = getEl("toggle-autosync");
@@ -1663,6 +1696,7 @@ async function onScrape() {
     const selectedOpt = getEl("select-order-state").options[getEl("select-order-state").selectedIndex];
     const orderStateLabel = selectedOpt ? selectedOpt.textContent : '';
     const timeframeValue = getEl("select-timeframe") ? getEl("select-timeframe").value : 'last_90_days';
+    const dispatchDate = getEl("select-dispatch") ? getEl("select-dispatch").value : 'all';
 
     if (!orderStateId) {
       setStatus("error", "❌", "Please auto-detect store info before fetching orders.", true);
@@ -1694,32 +1728,32 @@ async function onScrape() {
       orderStateId,
       orderStateLabel,
       timeframeValue,
+      dispatchDate,
     });
 
     if (!response?.ok) throw new Error(response?.error || "Scrape failed");
 
-    scrapedOrders = response.orders;
+    loadScrapedOrders(response.orders);
 
     const isCompletedTab = orderStateLabel.toLowerCase().includes('completed') || orderStateLabel.toLowerCase().includes('finish');
     const timeInfo = isCompletedTab ? `, Time: ${timeframeValue}` : '';
 
-    if (scrapedOrders.length === 0) {
+    if (allScrapedOrders.length === 0) {
       setStatus("error", "⚠️", "No orders found for this shop.", true);
       addSystemLog("info", `[Scrape] Fetched 0 orders (Tab: ${orderStateLabel}${timeInfo})`);
       return;
     }
 
-    renderPreview(scrapedOrders);
+    renderPreview();
     
     if (isCancelling) {
-      setStatus("info", "⚠️", `Scrape cancelled. Fetched ${scrapedOrders.length} orders.`, true);
-      addSystemLog("info", `[Scrape] Cancelled. Fetched ${scrapedOrders.length} orders (Tab: ${orderStateLabel}${timeInfo})`);
+      setStatus("info", "⚠️", `Scrape cancelled. Fetched ${allScrapedOrders.length} orders.`, true);
+      addSystemLog("info", `[Scrape] Cancelled. Fetched ${allScrapedOrders.length} orders (Tab: ${orderStateLabel}${timeInfo})`);
     } else {
-      setStatus("success", "✅", `${scrapedOrders.length} / ${response.total} orders fetched.`, true);
-      addSystemLog("info", `[Scrape] Successfully fetched ${scrapedOrders.length}/${response.total} orders (Tab: ${orderStateLabel}${timeInfo})`);
+      setStatus("success", "✅", `${allScrapedOrders.length} / ${response.total} orders fetched.`, true);
+      addSystemLog("info", `[Scrape] Successfully fetched ${allScrapedOrders.length}/${response.total} orders (Tab: ${orderStateLabel}${timeInfo})`);
     }
 
-    getEl("btn-push").disabled = false;
   } catch (err) {
     setStatus("error", "❌", `Error: ${err.message}`, true);
     addSystemLog("error", `[Manual Scrape] Scrape error: ${err.message}`);
@@ -1779,18 +1813,17 @@ async function onScrapeShopify() {
 
     if (!response?.ok) throw new Error(response?.error || "Scrape failed");
 
-    scrapedOrders = response.orders;
+    loadScrapedOrders(response.orders);
 
-    if (scrapedOrders.length === 0) {
+    if (allScrapedOrders.length === 0) {
       setStatus("error", "⚠️", "No orders found for this shop.", true);
       addSystemLog("info", `[Scrape] Fetched 0 Shopify orders`);
       return;
     }
 
-    renderPreview(scrapedOrders);
-    setStatus("success", "✅", `${scrapedOrders.length} orders fetched.`, true);
-    addSystemLog("info", `[Scrape] Successfully fetched ${scrapedOrders.length} Shopify orders`);
-    getEl("btn-push").disabled = false;
+    renderPreview();
+    setStatus("success", "✅", `${allScrapedOrders.length} orders fetched.`, true);
+    addSystemLog("info", `[Scrape] Successfully fetched ${allScrapedOrders.length} Shopify orders`);
   } catch (err) {
     let hint = "";
     if (/No live Shopify order query captured/.test(err.message)) {
@@ -1809,7 +1842,8 @@ async function onScrapeShopify() {
 // ─── Push ─────────────────────────────────────────────────────────────────────
 
 async function onPush() {
-  if (!scrapedOrders.length) return;
+  const ordersToPush = getSelectedOrders();
+  if (!ordersToPush.length) return;
 
   getEl("btn-push").disabled = true;
   getEl("btn-scrape").disabled = true;
@@ -1817,34 +1851,34 @@ async function onPush() {
   setStatus(
     "loading",
     "🚀",
-    `Pushing ${scrapedOrders.length} orders to Sellfern…`,
+    `Pushing ${ordersToPush.length} orders to Sellfern…`,
   );
 
   chrome.runtime.sendMessage(
-    { type: "PUSH_ORDERS", orders: scrapedOrders },
+    { type: "PUSH_ORDERS", orders: ordersToPush },
     (response) => {
       hideProgress();
       if (response?.ok) {
         const pushedCount = response.result?.pushed || 0;
-        
-        if (isCancelling && pushedCount < scrapedOrders.length) {
-          scrapedOrders = scrapedOrders.slice(pushedCount);
-          renderPreview(scrapedOrders);
+        const cancelledEarly = isCancelling && pushedCount < ordersToPush.length;
+        const pushed = cancelledEarly ? ordersToPush.slice(0, pushedCount) : ordersToPush;
+        removeOrders(new Set(pushed.map((o) => o.id)));
+
+        if (!allScrapedOrders.length) clearPreview();
+        else renderPreview();
+
+        if (cancelledEarly) {
           setStatus("info", "⚠️", `Push cancelled. Pushed ${pushedCount} orders.`, true);
           addSystemLog("info", `[Push] Cancelled. Pushed ${pushedCount} orders.`);
-          getEl("btn-push").disabled = false;
         } else {
-          scrapedOrders = [];
-          clearPreview();
           setStatus("success", "🎉", `Pushed ${pushedCount} orders to Sellfern!`, true);
           addSystemLog("success", `[Push] Successfully pushed ${pushedCount} orders.`);
-          getEl("btn-push").disabled = true;
         }
       } else {
         const errMsg = `Push failed: ${response?.error || "Unknown error"}`;
         setStatus("error", "❌", errMsg, true);
         addSystemLog("error", `[Push] ${errMsg}`);
-        getEl("btn-push").disabled = false;
+        updatePushButton();
       }
       getEl("btn-scrape").disabled = false;
       isCancelling = false;
@@ -1854,27 +1888,148 @@ async function onPush() {
 
 // ─── Preview ──────────────────────────────────────────────────────────────────
 
-function renderPreview(orders) {
+// "yyyy-mm-dd" (as stored on orders) <-> "dd/mm/yyyy" (as shown/typed).
+function isoToDmy(iso) {
+  const [y, m, d] = (iso || "").split("-");
+  return y && m && d ? `${d}/${m}/${y}` : "—";
+}
+
+function dmyToIso(text) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((text || "").trim());
+  if (!m) return "";
+  const [, d, mo, y] = m;
+  const date = new Date(Number(y), Number(mo) - 1, Number(d));
+  const valid = date.getFullYear() === Number(y) && date.getMonth() === Number(mo) - 1 && date.getDate() === Number(d);
+  return valid ? `${y}-${mo}-${d}` : "";
+}
+
+function dateToDmy(date) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(date.getDate())}/${p(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
+// Auto-inserts the slashes while typing: 25102026 -> 25/10/2026.
+function formatDmyInput(input) {
+  const digits = input.value.replace(/\D/g, "").slice(0, 8);
+  const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean);
+  input.value = parts.join("/");
+}
+
+function applyDateRange(range) {
+  const from = getEl("filter-date-from");
+  const to = getEl("filter-date-to");
+  const today = new Date();
+  if (range === "all") {
+    from.value = "";
+    to.value = "";
+  } else if (range === "today") {
+    from.value = to.value = dateToDmy(today);
+  } else if (range === "yesterday") {
+    const y = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    from.value = to.value = dateToDmy(y);
+  } else {
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (Number(range) - 1));
+    from.value = dateToDmy(start);
+    to.value = dateToDmy(today);
+  }
+  onOrderDateFilterChange();
+}
+
+// Filters by the order creation date (the same date shown in the Date column).
+function filterByOrderDate(orders) {
+  const from = dmyToIso(getEl("filter-date-from")?.value);
+  const to = dmyToIso(getEl("filter-date-to")?.value);
+  if (!from && !to) return orders;
+  return orders.filter((o) => {
+    const d = o.date ? o.date.split("T")[0] : "";
+    if (!d) return false;
+    return (!from || d >= from) && (!to || d <= to);
+  });
+}
+
+// Replaces the fetched list and selects everything that passes the date filter.
+function loadScrapedOrders(orders) {
+  allScrapedOrders = orders;
+  scrapedOrders = filterByOrderDate(allScrapedOrders);
+  selectedOrderIds = new Set(scrapedOrders.map((o) => o.id));
+}
+
+function onOrderDateFilterChange() {
+  if (!allScrapedOrders.length) return;
+  scrapedOrders = filterByOrderDate(allScrapedOrders);
+  selectedOrderIds = new Set(scrapedOrders.map((o) => o.id));
+  renderPreview();
+}
+
+function getVisibleOrders() {
+  const q = (getEl("search-order")?.value || "").trim().replace(/^#/, "").toLowerCase();
+  return q ? scrapedOrders.filter((o) => String(o.id).toLowerCase().includes(q)) : scrapedOrders;
+}
+
+function getSelectedOrders() {
+  return scrapedOrders.filter((o) => selectedOrderIds.has(o.id));
+}
+
+function removeOrders(ids) {
+  allScrapedOrders = allScrapedOrders.filter((o) => !ids.has(o.id));
+  scrapedOrders = scrapedOrders.filter((o) => !ids.has(o.id));
+  ids.forEach((id) => selectedOrderIds.delete(id));
+}
+
+function updatePushButton() {
+  const count = getSelectedOrders().length;
+  getEl("btn-push").disabled = count === 0;
+  getEl("push-label").textContent = count > 0 ? `Push to Sellfern (${count})` : "Push to Sellfern";
+}
+
+function renderPreview() {
+  const orders = getVisibleOrders();
   const tbody = getEl("preview-body");
   tbody.innerHTML = "";
   orders.forEach((o, i) => {
     const tr = document.createElement("tr");
-    const date = o.date ? o.date.split("T")[0] : "—";
+    const date = o.date ? isoToDmy(o.date.split("T")[0]) : "—";
     const sku = o.items[0]?.sku || "—";
     const qty = o.items.reduce((s, it) => s + (it.quantity || 1), 0);
     tr.innerHTML = `
+      <td><input type="checkbox" class="order-check" data-id="${o.id}" ${selectedOrderIds.has(o.id) ? "checked" : ""} /></td>
       <td>${i + 1}</td>
       <td title="${o.id}">${o.id}</td>
       <td>${date}</td>
-      <td title="${o.customerName}">${trunc(o.customerName, 12)}</td>
-      <td title="${sku}">${trunc(sku, 14)}</td>
+      <td class="col-sku" title="${sku}">${trunc(sku, 24)}</td>
       <td>${qty}</td>
       <td>$${o.totalAmount.toFixed(2)}</td>
     `;
     tbody.appendChild(tr);
   });
-  getEl("preview-count").textContent = `${orders.length} order(s)`;
+
+  const selectedCount = getSelectedOrders().length;
+  const total = allScrapedOrders.length;
+  getEl("preview-count").textContent = `${selectedCount} selected · ${orders.length}${total > orders.length ? ` / ${total}` : ""} order(s)`;
+
+  const selectAll = getEl("select-all-orders");
+  const visibleSelected = orders.filter((o) => selectedOrderIds.has(o.id)).length;
+  selectAll.checked = orders.length > 0 && visibleSelected === orders.length;
+  selectAll.indeterminate = visibleSelected > 0 && visibleSelected < orders.length;
+
   getEl("preview-section").style.display = "flex";
+  updatePushButton();
+}
+
+function onOrderCheckChange(e) {
+  const box = e.target.closest(".order-check");
+  if (!box) return;
+  if (box.checked) selectedOrderIds.add(box.dataset.id);
+  else selectedOrderIds.delete(box.dataset.id);
+  renderPreview();
+}
+
+function onSelectAllChange(e) {
+  getVisibleOrders().forEach((o) => {
+    if (e.target.checked) selectedOrderIds.add(o.id);
+    else selectedOrderIds.delete(o.id);
+  });
+  renderPreview();
 }
 
 function defaultHint() {
@@ -1884,11 +2039,18 @@ function defaultHint() {
 }
 
 function clearPreview() {
+  allScrapedOrders = [];
+  scrapedOrders = [];
+  selectedOrderIds = new Set();
+  ["filter-date-from", "filter-date-to", "search-order"].forEach((id) => {
+    const el = getEl(id);
+    if (el) el.value = "";
+  });
   const tbody = getEl("preview-body");
   if (tbody) tbody.innerHTML = "";
   const sec = getEl("preview-section");
   if (sec) sec.style.display = "none";
-  getEl("btn-push").disabled = true;
+  updatePushButton();
   setStatus("info", "🔍", defaultHint());
 }
 

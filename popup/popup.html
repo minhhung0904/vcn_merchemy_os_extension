@@ -241,6 +241,17 @@
         <select id="select-order-state" class="input">
         </select>
       </div>
+      <div class="field-group" id="dispatch-group" style="margin-top: 10px; display: none;">
+        <label class="label" for="select-dispatch" style="display: block; margin-bottom: 6px;">Dispatch by date</label>
+        <select id="select-dispatch" class="input">
+          <option value="all" selected>All</option>
+          <option value="ship_date_overdue">Overdue</option>
+          <option value="ship_date_today">Today</option>
+          <option value="ship_date_tomorrow">Tomorrow</option>
+          <option value="ship_date_this_week">Within a week</option>
+          <option value="no_estimate">No estimate</option>
+        </select>
+      </div>
       <div class="field-group" id="timeframe-group" style="margin-top: 10px; display: none;">
         <label class="label" for="select-timeframe" style="display: block; margin-bottom: 6px;">Completed Date</label>
         <select id="select-timeframe" class="input">
@@ -278,10 +289,30 @@
         <span id="preview-count">0 orders found</span>
         <button class="btn-link" id="btn-clear">Clear</button>
       </div>
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <label class="label" for="filter-date-from" style="margin: 0; white-space: nowrap;">Order date</label>
+        <span style="position: relative; flex: 1; min-width: 0; display: inline-flex;">
+          <input type="text" id="filter-date-from" class="input" placeholder="dd/mm/yyyy" maxlength="10" inputmode="numeric" autocomplete="off" style="width: 100%; cursor: pointer;" />
+          <input type="date" id="filter-date-from-picker" tabindex="-1" aria-hidden="true" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;" />
+        </span>
+        <span>–</span>
+        <span style="position: relative; flex: 1; min-width: 0; display: inline-flex;">
+          <input type="text" id="filter-date-to" class="input" placeholder="dd/mm/yyyy" maxlength="10" inputmode="numeric" autocomplete="off" style="width: 100%; cursor: pointer;" />
+          <input type="date" id="filter-date-to-picker" tabindex="-1" aria-hidden="true" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;" />
+        </span>
+      </div>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+        <button type="button" class="btn-link" data-date-range="today">Today</button>
+        <button type="button" class="btn-link" data-date-range="yesterday">Yesterday</button>
+        <button type="button" class="btn-link" data-date-range="7">Last 7 days</button>
+        <button type="button" class="btn-link" data-date-range="30">Last 30 days</button>
+        <button type="button" class="btn-link" data-date-range="all">All</button>
+      </div>
+      <input type="text" id="search-order" class="input" placeholder="Search Order ID…" autocomplete="off" />
       <div class="table-wrap">
         <table class="preview-table">
           <thead>
-            <tr><th>#</th><th>Order ID</th><th>Date</th><th>Customer</th><th>SKU</th><th>Qty</th><th>Total</th></tr>
+            <tr><th><input type="checkbox" id="select-all-orders" title="Select all" checked /></th><th>#</th><th>Order ID</th><th>Date</th><th class="col-sku">SKU</th><th>Qty</th><th>Total</th></tr>
           </thead>
           <tbody id="preview-body"></tbody>
         </table>
@@ -291,7 +322,7 @@
     <!-- Actions -->
     <div class="actions">
       <button class="btn btn-secondary" id="btn-scrape"><span>📥</span> Fetch Orders</button>
-      <button class="btn btn-primary" id="btn-push" disabled><span>🚀</span> Push to Sellfern</button>
+      <button class="btn btn-primary" id="btn-push" disabled><span>🚀</span> <span id="push-label">Push to Sellfern</span></button>
     </div>
 
     <!-- Progress Bar -->
