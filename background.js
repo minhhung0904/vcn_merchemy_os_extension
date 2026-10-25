@@ -74,22 +74,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ─── Flow Studio ──────────────────────────────────────────────────────────────
 
 async function flowStudioFetch(path, options = {}) {
-  // Flow Studio has its own token, separate from the order-sync apiToken.
-  const { flowApiToken } = await new Promise((res) => chrome.storage.local.get(["flowApiToken"], res));
-  if (!flowApiToken)
-    throw new Error("No Flow Studio API token configured. Please set it in the extension Settings.");
+  // Flow Studio shares the order-sync apiToken.
+  const { apiToken } = await new Promise((res) => chrome.storage.local.get(["apiToken"], res));
+  if (!apiToken)
+    throw new Error("No API token configured. Please set it in the extension Settings.");
 
   const res = await fetch(`${DEFAULT_API_URL}/flow-studio${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": flowApiToken,
+      "x-api-key": apiToken,
       ...(options.headers || {}),
     },
   });
 
   if (res.status === 401) {
-    throw new Error("Invalid or expired Flow Studio API token. Please update it in the extension Settings.");
+    throw new Error("Invalid or expired API token. Please update it in the extension Settings.");
   }
   if (res.status === 403) {
     throw new Error("You don't have access to this board in Sellfern yet — ask a teammate to add you in Flow Studio.");

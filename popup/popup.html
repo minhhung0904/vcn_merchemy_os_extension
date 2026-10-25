@@ -363,12 +363,6 @@
       </div>
     </header>
 
-    <!-- Settings tabs: Order Sync and Flow Studio are configured independently -->
-    <div class="platform-tabs" id="settings-tabs">
-      <button class="platform-tab active" data-settings-tab="sync" type="button">Order Sync</button>
-      <button class="platform-tab" data-settings-tab="flow" type="button">Flow Studio</button>
-    </div>
-
     <div id="settings-tab-sync" style="display:flex; flex-direction:column; gap:12px;">
 
     <!-- ─── VIEW MODE (token already configured) ─── -->
@@ -387,6 +381,10 @@
             <span>API Token</span>
             <span class="token-mask" id="view-token-mask">••••••••</span>
           </div>
+          <div class="conn-card-token">
+            <span>Flow Studio board</span>
+            <span class="token-mask" id="view-board-name" style="font-family: inherit; letter-spacing: 0;">—</span>
+          </div>
         </div>
       </section>
 
@@ -396,7 +394,7 @@
 
       <div class="set-danger-zone">
         <button class="btn-remove" id="set-btn-remove" type="button">🗑 Remove API Token</button>
-        <span class="hint">Disconnects this extension from your organization. You can add a token again anytime.</span>
+        <span class="hint">Disconnects Order Sync and Flow Studio from this extension. You can add a token again anytime.</span>
       </div>
     </div>
 
@@ -408,7 +406,7 @@
       </p>
 
       <section class="section">
-        <label class="label" for="set-api-token">Order Sync API Token</label>
+        <label class="label" for="set-api-token">API Token</label>
         <div class="input-row">
           <input id="set-api-token" type="password" class="input" placeholder="sk_..." autocomplete="off" />
           <button class="btn-eye" id="set-btn-token-eye" title="Show/hide" type="button">👁</button>
@@ -416,11 +414,20 @@
         <span class="hint">
           Create a token in Merchemy OS → Settings → API Tokens, then paste it here.
           This token is already tied to a specific organization (org) — no login or org selection needed in the extension.
+          One token covers both Order Sync and Flow Studio.
         </span>
         <div class="actions" style="margin-top: 6px;">
           <button class="btn btn-secondary" id="set-btn-test" type="button" style="flex: 0 0 auto; padding: 7px 14px;">Test Connection</button>
           <span class="conn-status" id="set-conn-status"></span>
         </div>
+      </section>
+
+      <section class="section">
+        <label class="label" for="set-default-board">Flow Studio default board</label>
+        <span class="hint">Listed first when you push an order. Available after a successful Test Connection.</span>
+        <select id="set-default-board" class="input" disabled>
+          <option value="">No default board</option>
+        </select>
       </section>
 
       <div class="actions" style="margin-top: 4px;">
@@ -432,71 +439,6 @@
 
     </div><!-- /settings-tab-sync -->
 
-    <!-- ─── FLOW STUDIO TAB (independent of Order Sync) ─── -->
-    <div id="settings-tab-flow" style="display:none; flex-direction:column; gap:12px;">
-
-      <!-- VIEW MODE (token saved) -->
-      <div id="flow-view-mode" style="display:none; flex-direction:column; gap:12px;">
-        <section class="section">
-          <label class="label">Flow Studio</label>
-          <div class="conn-card">
-            <div class="conn-card-row">
-              <span class="conn-dot"></span>
-              <div>
-                <div class="conn-card-org" id="flow-view-org">—</div>
-                <div class="conn-card-sub">Connected to Flow Studio</div>
-              </div>
-            </div>
-            <div class="conn-card-token">
-              <span>API Token</span>
-              <span class="token-mask" id="flow-view-token-mask">••••••••</span>
-            </div>
-            <div class="conn-card-token">
-              <span>Default board</span>
-              <span class="token-mask" id="flow-view-board" style="font-family: inherit; letter-spacing: 0;">—</span>
-            </div>
-          </div>
-        </section>
-        <div class="actions">
-          <button class="btn btn-primary btn-full" id="flow-btn-edit" type="button"><span>✏️</span> Edit</button>
-        </div>
-        <div class="set-danger-zone">
-          <button class="btn-remove" id="flow-btn-remove" type="button">🗑 Remove Flow Studio Token</button>
-          <span class="hint">Disconnects Flow Studio from this extension. Order Sync is not affected.</span>
-        </div>
-      </div>
-
-      <!-- EDIT MODE (first-time setup or editing) -->
-      <div id="flow-edit-mode" style="display:none; flex-direction:column; gap:12px;">
-        <section class="section">
-          <label class="label" for="flow-api-token">Flow Studio API Token</label>
-          <span class="hint">
-            Separate from the Order Sync token. Get your own in Sellfern → Flow Studio → <strong>Settings → Extension token</strong>.
-            It only reaches the boards you have access to — don't share it.
-          </span>
-          <div class="input-row">
-            <input id="flow-api-token" type="password" class="input" placeholder="fl_..." autocomplete="off" />
-            <button class="btn-eye" id="flow-btn-token-eye" title="Show/hide" type="button">👁</button>
-          </div>
-          <div class="actions" style="margin-top: 6px;">
-            <button class="btn btn-secondary" id="flow-btn-test" type="button" style="flex: 0 0 auto; padding: 7px 14px;">Test Connection</button>
-            <span class="conn-status" id="flow-conn-status"></span>
-          </div>
-        </section>
-        <section class="section">
-          <label class="label" for="flow-default-board">Default board</label>
-          <span class="hint">Listed first when you push an order. Available after a successful Test Connection.</span>
-          <select id="flow-default-board" class="input" disabled>
-            <option value="">No default board</option>
-          </select>
-        </section>
-        <div class="actions" style="margin-top: 4px;">
-          <button class="btn btn-secondary btn-full" id="flow-btn-cancel" type="button">Cancel</button>
-          <button class="btn btn-primary btn-full" id="flow-btn-save" type="button" disabled><span>💾</span> Save</button>
-        </div>
-        <span class="save-status" id="flow-save-status" style="text-align:center;"></span>
-      </div>
-    </div><!-- /settings-tab-flow -->
   </div>
 
   <script type="module" src="../config.js"></script>

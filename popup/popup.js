@@ -347,8 +347,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Flow Studio no longer has its own token; drop leftovers from older installs.
+  storage.remove(["flowApiToken", "flowOrgName"]);
+
   bindSettingsEvents();
-  bindFlowSettingsEvents();
   bindMainEvents();
   checkAuth();
 });
@@ -431,6 +433,7 @@ function showSettingsMode(mode) {
 function renderSettingsViewMode() {
   getEl("view-org-name").textContent = settingsSavedOrg || "your organization";
   getEl("view-token-mask").textContent = maskToken(settingsSavedToken);
+  getEl("view-board-name").textContent = settingsSavedBoardName || "No default board";
   showSettingsMode("view");
 }
 
@@ -445,11 +448,16 @@ function enterSettingsEditMode(token) {
   getEl("set-conn-status").textContent = "";
   getEl("set-save-status").className = "save-status";
   getEl("set-save-status").textContent = "";
+  resetBoardSelect();
 
   if (token) {
     settingsTestedToken = token;
     settingsOrgLabel = settingsSavedOrg;
     setSaveEnabled(true);
+    // Re-use the saved token to populate the board list straight away.
+    fetchFlowBoards(token)
+      .then((boards) => { if (getEl("set-api-token").value.trim() === token) renderBoardOptions(boards, settingsSavedBoardId); })
+      .catch(() => {});
   } else {
     settingsTestedToken = null;
     settingsOrgLabel = "";
@@ -459,9 +467,11 @@ function enterSettingsEditMode(token) {
 }
 
 function openSettingsView() {
-  storage.get(["apiToken", "orgName"]).then((data) => {
+  storage.get(["apiToken", "orgName", "flowDefaultBoardId", "flowDefaultBoardName"]).then((data) => {
     settingsSavedToken = data.apiToken || "";
     settingsSavedOrg = data.orgName || "";
+    settingsSavedBoardId = data.flowDefaultBoardId || "";
+    settingsSavedBoardName = data.flowDefaultBoardName || "";
 
     if (settingsSavedToken) {
       renderSettingsViewMode();   // configured → read-only view first
@@ -470,7 +480,6 @@ function openSettingsView() {
     }
     showView("settings");
   });
-  loadFlowSettings();
 }
 
 function bindSettingsEvents() {
@@ -509,6 +518,7 @@ function bindSettingsEvents() {
       const token = tokenInput.value.trim();
       if (token !== settingsTestedToken) {
         setSaveEnabled(false);
+        resetBoardSelect();
         const statusEl = getEl("set-conn-status");
         statusEl.className = "conn-status";
         statusEl.textContent = token ? "Test connection to enable Save." : "";
@@ -557,6 +567,13 @@ function bindSettingsEvents() {
         statusEl.className = "conn-status ok";
         statusEl.textContent = `🟢 Connected — ${label}`;
         setSaveEnabled(true);
+
+        // Flow Studio boards are optional: a token without flow scope still saves.
+        try {
+          renderBoardOptions(await fetchFlowBoards(token), getEl("set-default-board").value || settingsSavedBoardId);
+        } catch (boardErr) {
+          resetBoardSelect(boardErr.message || "Flow Studio unavailable");
+        }
       } catch (err) {
         settingsTestedToken = null;
         settingsOrgLabel = "";
@@ -582,6 +599,16 @@ function bindSettingsEvents() {
       }
 
       await storage.set({ apiToken: token, orgName: settingsOrgLabel });
+      const board = settingsBoards.find((b) => String(b.id) === getEl("set-default-board").value);
+      if (board) {
+        settingsSavedBoardId = String(board.id);
+        settingsSavedBoardName = board.title || "Untitled board";
+        await storage.set({ flowDefaultBoardId: board.id, flowDefaultBoardName: settingsSavedBoardName });
+      } else {
+        settingsSavedBoardId = "";
+        settingsSavedBoardName = "";
+        await storage.remove(["flowDefaultBoardId", "flowDefaultBoardName"]);
+      }
       settingsSavedToken = token;
       settingsSavedOrg = settingsOrgLabel;
       renderSettingsViewMode();   // back to read-only view showing the org
@@ -612,9 +639,11 @@ function bindSettingsEvents() {
       }
 
       resetRemoveBtn();
-      await storage.remove(["apiToken", "orgName"]);
+      await storage.remove(["apiToken", "orgName", "flowDefaultBoardId", "flowDefaultBoardName"]);
       settingsSavedToken = "";
       settingsSavedOrg = "";
+      settingsSavedBoardId = "";
+      settingsSavedBoardName = "";
       settingsTestedToken = null;
       settingsOrgLabel = "";
       enterSettingsEditMode("");   // drop into empty edit mode to add a new one
@@ -623,33 +652,13 @@ function bindSettingsEvents() {
   }
 }
 
-// ─── Flow Studio settings (independent of Order Sync) ────────────────────────
-// Own tab, own storage keys (flowApiToken, flowDefaultBoardId). View mode shows
-// what is saved; Edit lets you change both the token and the default board.
+// ─── Flow Studio default board (shares the Order Sync apiToken) ──────────────
+// One token covers both Order Sync and Flow Studio; only the default board
+// (flowDefaultBoardId) is Flow-specific.
 
-let flowTestedToken = null;
-let flowBoards = [];
-let flowSaved = { token: "", boardId: "" };
-let flowTestedOrg = "";
-
-function setFlowStatus(id, cls, text) {
-  const el = getEl(id);
-  if (!el) return;
-  el.className = (id === "flow-conn-status" ? "conn-status " : "save-status ") + cls;
-  el.textContent = text;
-}
-
-function showFlowMode(mode) {
-  getEl("flow-view-mode").style.display = mode === "view" ? "flex" : "none";
-  getEl("flow-edit-mode").style.display = mode === "edit" ? "flex" : "none";
-}
-
-function showSettingsTab(tab) {
-  document.querySelectorAll("[data-settings-tab]").forEach((b) =>
-    b.classList.toggle("active", b.dataset.settingsTab === tab));
-  getEl("settings-tab-sync").style.display = tab === "sync" ? "flex" : "none";
-  getEl("settings-tab-flow").style.display = tab === "flow" ? "flex" : "none";
-}
+let settingsBoards = [];
+let settingsSavedBoardId = "";
+let settingsSavedBoardName = "";
 
 // GET /flow-studio/boards with the given token → boards array (throws on failure).
 async function fetchFlowBoards(token) {
@@ -665,167 +674,31 @@ async function fetchFlowBoards(token) {
   return Array.isArray(boards) ? boards : [];
 }
 
-// GET /flow-studio/me → organization name the token belongs to ("" if unavailable).
-async function fetchFlowOrgName(token) {
-  try {
-    const res = await fetch(`${DEFAULT_API_URL}/flow-studio/me`, { headers: { "x-api-key": token } });
-    if (!res.ok) return "";
-    const body = await res.json().catch(() => ({}));
-    return ((body.success ? body.data : body)?.organization_name || "").trim();
-  } catch (_) {
-    return "";
-  }
+function resetBoardSelect(placeholder) {
+  const select = getEl("set-default-board");
+  select.innerHTML = "";
+  const opt = document.createElement("option");
+  opt.value = "";
+  opt.textContent = placeholder || "No default board";
+  select.appendChild(opt);
+  select.disabled = true;
+  settingsBoards = [];
 }
 
-function renderFlowBoardOptions(boards, selectedId) {
-  const select = getEl("flow-default-board");
-  select.innerHTML = '<option value="">No default board</option>';
+function renderBoardOptions(boards, selectedId) {
+  const select = getEl("set-default-board");
+  resetBoardSelect();
   boards.forEach((b) => {
     const opt = document.createElement("option");
     opt.value = String(b.id);
     opt.textContent = b.title || "Untitled board";
     select.appendChild(opt);
   });
+  settingsBoards = boards;
   // A saved board that no longer exists falls back to "No default board".
   const match = boards.find((b) => String(b.id) === String(selectedId));
   select.value = match ? String(match.id) : "";
   select.disabled = false;
-}
-
-function renderFlowViewMode(token, boardName, orgName) {
-  getEl("flow-view-org").textContent = orgName || "your organization";
-  getEl("flow-view-token-mask").textContent = maskToken(token);
-  getEl("flow-view-board").textContent = boardName || "No default board";
-  showFlowMode("view");
-}
-
-async function loadFlowSettings() {
-  const { flowApiToken, flowDefaultBoardId, flowDefaultBoardName, flowOrgName } =
-    await storage.get(["flowApiToken", "flowDefaultBoardId", "flowDefaultBoardName", "flowOrgName"]);
-  flowSaved = { token: flowApiToken || "", boardId: flowDefaultBoardId || "" };
-  if (flowSaved.token) renderFlowViewMode(flowSaved.token, flowDefaultBoardName, flowOrgName);
-  else enterFlowEditMode("");
-}
-
-// Opens the editor. With an existing token it is re-validated right away so the
-// board list is available without pressing Test Connection first.
-async function enterFlowEditMode(token) {
-  const input = getEl("flow-api-token");
-  input.value = token || "";
-  input.type = "password";
-  getEl("flow-btn-token-eye").textContent = "👁";
-  getEl("flow-btn-cancel").style.display = flowSaved.token ? "" : "none";
-  setFlowStatus("flow-conn-status", "", "");
-  setFlowStatus("flow-save-status", "", "");
-  flowTestedToken = null;
-  flowBoards = [];
-  const select = getEl("flow-default-board");
-  select.innerHTML = '<option value="">No default board</option>';
-  select.disabled = true;
-  getEl("flow-btn-save").disabled = true;
-  showFlowMode("edit");
-  if (token) await testFlowConnection(token, flowSaved.boardId);
-}
-
-async function testFlowConnection(token, selectedBoardId) {
-  setFlowStatus("flow-conn-status", "loading", "⏳ Testing…");
-  getEl("flow-btn-save").disabled = true;
-  try {
-    const [boards, orgName] = await Promise.all([fetchFlowBoards(token), fetchFlowOrgName(token)]);
-    flowBoards = boards;
-    flowTestedToken = token;
-    flowTestedOrg = orgName;
-    renderFlowBoardOptions(flowBoards, selectedBoardId);
-    setFlowStatus("flow-conn-status", "ok", `🟢 Connected — ${orgName || "your organization"}`);
-    getEl("flow-btn-save").disabled = false;
-  } catch (err) {
-    flowTestedToken = null;
-    flowTestedOrg = "";
-    flowBoards = [];
-    const select = getEl("flow-default-board");
-    select.innerHTML = '<option value="">No default board</option>';
-    select.disabled = true;
-    setFlowStatus("flow-conn-status", "err", `🔴 ${err.message || "Connection failed."}`);
-  }
-}
-
-function bindFlowSettingsEvents() {
-  const input = getEl("flow-api-token");
-  if (!input) return;
-
-  document.querySelectorAll("[data-settings-tab]").forEach((btn) =>
-    btn.addEventListener("click", () => showSettingsTab(btn.dataset.settingsTab)));
-
-  getEl("flow-btn-edit").addEventListener("click", () => enterFlowEditMode(flowSaved.token));
-
-  getEl("flow-btn-cancel").addEventListener("click", () => loadFlowSettings());
-
-  getEl("flow-btn-token-eye").addEventListener("click", () => {
-    const hidden = input.type === "password";
-    input.type = hidden ? "text" : "password";
-    getEl("flow-btn-token-eye").textContent = hidden ? "🙈" : "👁";
-  });
-
-  // Editing the token invalidates the last test (and the board list tied to it).
-  input.addEventListener("input", () => {
-    const token = input.value.trim();
-    if (token !== flowTestedToken) {
-      getEl("flow-btn-save").disabled = true;
-      const select = getEl("flow-default-board");
-      select.disabled = true;
-      setFlowStatus("flow-conn-status", "", token ? "Test connection to enable Save." : "");
-      setFlowStatus("flow-save-status", "", "");
-    }
-  });
-
-  getEl("flow-btn-test").addEventListener("click", async () => {
-    const token = input.value.trim();
-    if (!token) {
-      setFlowStatus("flow-conn-status", "err", "🔴 Please enter a Flow Studio token first.");
-      return;
-    }
-    const current = getEl("flow-default-board").value;
-    await testFlowConnection(token, current || flowSaved.boardId);
-  });
-
-  getEl("flow-btn-save").addEventListener("click", async () => {
-    const token = input.value.trim();
-    if (!token || token !== flowTestedToken) {
-      setFlowStatus("flow-save-status", "err", "⚠️ Test connection successfully before saving.");
-      getEl("flow-btn-save").disabled = true;
-      return;
-    }
-    const boardId = getEl("flow-default-board").value;
-    const board = flowBoards.find((b) => String(b.id) === boardId);
-    await storage.set({ flowApiToken: token, flowOrgName: flowTestedOrg });
-    if (board) await storage.set({ flowDefaultBoardId: board.id, flowDefaultBoardName: board.title || "Untitled board" });
-    else await storage.remove(["flowDefaultBoardId", "flowDefaultBoardName"]);
-    await loadFlowSettings();
-    setFlowStatus("flow-save-status", "", "");
-  });
-
-  const btnRemove = getEl("flow-btn-remove");
-  let armed = false;
-  let timer = null;
-  const reset = () => {
-    armed = false;
-    if (timer) clearTimeout(timer);
-    btnRemove.classList.remove("confirm");
-    btnRemove.textContent = "🗑 Remove Flow Studio Token";
-  };
-  btnRemove.addEventListener("click", async () => {
-    if (!armed) {
-      armed = true;
-      btnRemove.classList.add("confirm");
-      btnRemove.textContent = "⚠️ Click again to confirm";
-      timer = setTimeout(reset, 3000);
-      return;
-    }
-    reset();
-    await storage.remove(["flowApiToken", "flowOrgName", "flowDefaultBoardId", "flowDefaultBoardName"]);
-    await loadFlowSettings();
-    setFlowStatus("flow-save-status", "", "🗑 Flow Studio token removed.");
-  });
 }
 
 // ─── Logging Utility ────────────────────────────────────────────────────────
@@ -1645,13 +1518,7 @@ function bindMainEvents() {
           systemLogs.forEach(lg => {
              const li = document.createElement("li");
              const timeStr = new Date(lg.time).toLocaleString('en-US');
-             let colorLine = "#ccc";
-             if (lg.type === "error") colorLine = "#ff6b6b";
-             if (lg.type === "success") colorLine = "#51cf66";
-             li.style.color = colorLine;
-             li.style.marginBottom = "4px";
-             li.style.borderBottom = "1px solid #333";
-             li.style.paddingBottom = "4px";
+             li.className = "log-item" + (lg.type === "error" || lg.type === "success" ? ` log-${lg.type}` : "");
              li.innerHTML = `<strong>[${timeStr}]</strong> ${lg.message}`;
              logsList.appendChild(li);
           });

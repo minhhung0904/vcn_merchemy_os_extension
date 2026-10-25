@@ -72,19 +72,19 @@ body::-webkit-scrollbar-thumb {
 }
 
 body.light-theme {
-  --bg:       #f8fafc;
-  --surface:  #ffffff;
-  --surface2: #eef2f7;
-  --border:   #cbd5e1;
+  --bg:       #f5f7fa;
+  --surface:  #fbfcfd;
+  --surface2: #eef1f5;
+  --border:   #d2d8e2;
   --accent:   #0d9488;
   --accent2:  #0f766e;
   --link:     #0f766e;
-  --disabled-text: #334155;
-  --disabled-bg: #e2e8f0;
-  --green:    #10b981;
-  --red:      #dc2626;
-  --text:     #0f172a;
-  --muted:    #475569;
+  --disabled-text: #2f3a4c;
+  --disabled-bg: #d3d9e2;
+  --green:    #0b7f58;
+  --red:      #b42323;
+  --text:     #020617;
+  --muted:    #1e293b;
 }
 
 body.light-theme .input,
@@ -97,14 +97,14 @@ body.light-theme .table-wrap {
 }
 
 body.light-theme .input::placeholder {
-  color: #64748b;
+  color: #475569;
   opacity: 1;
 }
 
 body.light-theme .label,
 body.light-theme .option-label,
 body.light-theme .preview-table th {
-  color: #334155;
+  color: #0f172a;
 }
 
 body.light-theme .status-box,
@@ -113,7 +113,7 @@ body.light-theme .footer,
 body.light-theme .progress-label,
 body.light-theme .login-sub,
 body.light-theme .user-badge {
-  color: #475569;
+  color: #1e293b;
 }
 
 body.light-theme .sync-card.active {
@@ -121,7 +121,7 @@ body.light-theme .sync-card.active {
 }
 
 body.light-theme .sync-options-inner {
-  border-top-color: #cbd5e1;
+  border-top-color: #d2d8e2;
 }
 
 body {
@@ -453,6 +453,15 @@ body.light-theme::-webkit-scrollbar-thumb {
   to { transform: rotate(360deg); }
 }
 
+/* ── Logs ── */
+.log-item { color: #ccc; margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #333; }
+.log-item.log-error { color: #ff6b6b; }
+.log-item.log-success { color: #51cf66; }
+body.light-theme .log-item { color: #000; border-bottom-color: #d2d8e2; }
+body.light-theme .log-item.log-error { color: #a31515; }
+body.light-theme .log-item.log-success { color: #0a6b2e; }
+body.light-theme #logs-list { color: #000 !important; }
+
 /* ── Footer ── */
 .footer { padding-top: 8px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); display: flex; justify-content: flex-end; }
 
@@ -508,7 +517,7 @@ body.light-theme::-webkit-scrollbar-thumb {
   content: "";
   height: 14px; width: 14px;
   left: 3px; bottom: 3px;
-  background-color: white;
+  background-color: #f1f5f9;
   transition: .3s;
   border-radius: 50%;
 }
