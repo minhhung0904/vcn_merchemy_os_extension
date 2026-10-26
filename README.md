@@ -1,6 +1,6 @@
-# Merchemy OS – Order Scraper Extension
+# Sellfern – Order Scraper Extension
 
-A Chrome Extension that fetches orders directly from the **Etsy Mission Control API** and pushes them into **Merchemy OS** via Order Ingestion — replacing the Gmail Live Sync workflow.
+A Chrome Extension that fetches orders directly from the **Etsy Mission Control API** and pushes them into **Sellfern** via Order Ingestion — replacing the Gmail Live Sync workflow.
 
 ---
 
@@ -47,13 +47,13 @@ node generate-icons.js
 
 ### 3. Configure
 1. Click the extension icon → **⚙️ Settings**
-2. Paste your **Merchemy OS Auth Token** (see below how to get it)
-3. Set your **Default Store Name** (must match the store name in Merchemy)
+2. Paste your **Sellfern Auth Token** (see below how to get it)
+3. Set your **Default Store Name** (must match the store name in Sellfern)
 4. Click **Test Connection** → should show 🟢 Connected
 5. Click **Save Settings**
 
 ### How to get your Auth Token
-1. Log in to Merchemy OS in Chrome
+1. Log in to Sellfern in Chrome
 2. Open DevTools (F12) → Console
 3. Run: `localStorage.getItem('auth_token')`
 4. Copy the token and paste into Settings
@@ -68,9 +68,9 @@ Etsy (browser session)
 Etsy Mission Control API
   GET /api/v3/ajax/bespoke/shop/{shopId}/mission-control/orders/data
     ↓ paginated, JSON
-Data Mapper → Merchemy OS Order format
+Data Mapper → Sellfern Order format
     ↓ background.js pushes via
-Merchemy OS API
+Sellfern API
   POST /api/v2/orders/bulk
 ```
 
@@ -80,7 +80,7 @@ The content script runs **inside the Etsy tab** so your session cookies are auto
 
 ## 📊 Data Mapping
 
-| Etsy Field | Merchemy Field |
+| Etsy Field | Sellfern Field |
 |---|---|
 | `order_id` | `Order.id` |
 | `order_date` (Unix timestamp) | `Order.date` (ISO string) |

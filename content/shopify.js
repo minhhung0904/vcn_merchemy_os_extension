@@ -180,6 +180,8 @@
       fulfillmentStatus: node.displayFulfillmentStatus || '',
     };
 
+    console.log('[Sellfern][Shopify] Phone detect:', { orderId, phone: orderCtx.phone || null, addrKeys: Object.keys(addr) });
+
     const items = mapLineItems(node, orderCtx);
 
     return {

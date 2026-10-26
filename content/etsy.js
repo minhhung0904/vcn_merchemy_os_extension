@@ -616,6 +616,8 @@
     const orderId = getOrderId(etsyOrder);
     const shipment = (orderCtx.shipments && orderCtx.shipments[orderId])?.[0] || null;
 
+    console.log('[Sellfern][Etsy] Phone detect:', { orderId, phone: phone || null, addrKeys: Object.keys(addr) });
+
     // Map transactions → items
     const buyerNote = getV(notes, 'note_from_buyer', 'noteFromBuyer') || '';
     const privateNotes = (getV(notes, 'private_order_notes', 'privateOrderNotes') || [])
