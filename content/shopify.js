@@ -210,6 +210,7 @@
       shipState: orderCtx.shipState,
       shipZipcode: orderCtx.shipZipcode,
       shipCountry: orderCtx.shipCountry,
+      phone: orderCtx.phone,
 
       couponCode: '',
       paymentMethod: node.displayFinancialStatus || '',
