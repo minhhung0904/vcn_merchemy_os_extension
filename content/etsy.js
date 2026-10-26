@@ -592,15 +592,16 @@
     const customerName = buyer.name || addr.name || 'Unknown Buyer';
     const customerEmail = buyer.email || '';
     const shipName     = addr.name || customerName;
-    const shipAddress1 = getV(addr, 'first_line', 'firstLine') || '';
-    const shipAddress2 = getV(addr, 'second_line', 'secondLine') || '';
+    const shipAddress1 = [getV(addr, 'first_line', 'firstLine'), getV(addr, 'second_line', 'secondLine')]
+      .filter(Boolean).join(', ');
+    const shipAddress2 = '';
     const shipCity     = addr.city || '';
     const shipState    = addr.state || '';
     const shipZipcode  = addr.zip || '';
     const shipCountry  = addr.country || '';
     const phone        = addr.phone || '';
 
-    const customerAddress = [shipAddress1, shipAddress2, shipCity, shipState, shipZipcode, shipCountry]
+    const customerAddress = [shipName, shipAddress1, shipCity, shipState, shipZipcode, shipCountry]
       .filter(Boolean).join(', ');
 
     const orderDateVal = getV(etsyOrder, 'order_date', 'orderDate');

@@ -159,7 +159,8 @@
     const addr = node.shippingAddress || {};
 
     const customerName = addr.name || node.email || 'Unknown Buyer';
-    const customerAddress = [addr.address1, addr.address2, addr.city, addr.provinceCode || addr.province, addr.zip, addr.countryCodeV2 || addr.country]
+    const shipAddress1 = [addr.address1, addr.address2].filter(Boolean).join(', ');
+    const customerAddress = [addr.name, shipAddress1, addr.city, addr.provinceCode || addr.province, addr.zip, addr.countryCodeV2 || addr.country]
       .filter(Boolean).join(', ');
 
     const orderCtx = {
@@ -169,8 +170,8 @@
       customerName,
       customerAddress,
       shipName: addr.name || customerName,
-      shipAddress1: addr.address1 || '',
-      shipAddress2: addr.address2 || '',
+      shipAddress1,
+      shipAddress2: '',
       shipCity: addr.city || '',
       shipState: addr.provinceCode || addr.province || '',
       shipZipcode: addr.zip || '',
