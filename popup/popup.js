@@ -272,16 +272,13 @@ function bindShopifyAutoSyncCard() {
       hoursWrap.style.display = "flex";
     }
 
-    const displaySummary = getEl("autosync-summary-shopify");
-    if (displaySummary) {
-      if (!isEnabled) {
-        displaySummary.textContent = "OFF";
-      } else if (modeSelect.value === "daily") {
-        displaySummary.textContent = `ON (Daily at ${to24h(th.value, tm.value)})`;
-      } else {
-        displaySummary.textContent = `ON (Every ${hoursInput.value} hours from ${to24h(sh.value, sm.value)})`;
-      }
-    }
+    renderSyncDisplay(
+      "-shopify",
+      isEnabled,
+      modeSelect.value === "daily"
+        ? `Daily at ${to24h(th.value, tm.value)}`
+        : `Every ${hoursInput.value}h from ${to24h(sh.value, sm.value)}`,
+    );
 
     checkChanges();
   }
@@ -1082,9 +1079,12 @@ function bindMainEvents() {
 
   getEl("btn-detect-shop").addEventListener("click", async () => {
     const btn = getEl("btn-detect-shop");
-    btn.textContent = "Detecting...";
+    const label = getEl("detect-label");
+    btn.disabled = true;
+    label.textContent = "Detecting...";
     await forceDetectShopInfo(false);
-    btn.textContent = "Auto Detect";
+    label.textContent = "Auto Detect";
+    btn.disabled = false;
   });
   
   const btnRecheck = getEl("btn-recheck-store");
@@ -1217,30 +1217,7 @@ function bindMainEvents() {
     storage.set({ completedTimeframe: e.target.value });
   });
 
-  ["filter-date-from", "filter-date-to"].forEach((id) => {
-    const input = getEl(id);
-    input.addEventListener("input", () => {
-      formatDmyInput(input);
-      onOrderDateFilterChange();
-    });
-  });
-  // Clicking a date field opens the native calendar; the pick is written back as dd/mm/yyyy.
-  ["filter-date-from", "filter-date-to"].forEach((id) => {
-    const textInput = getEl(id);
-    const picker = getEl(`${id}-picker`);
-    textInput.addEventListener("click", () => {
-      picker.value = dmyToIso(textInput.value);
-      if (picker.showPicker) picker.showPicker();
-    });
-    picker.addEventListener("change", () => {
-      if (!picker.value) return;
-      textInput.value = isoToDmy(picker.value);
-      onOrderDateFilterChange();
-    });
-  });
-  document.querySelectorAll("[data-date-range]").forEach((btn) => {
-    btn.addEventListener("click", () => applyDateRange(btn.dataset.dateRange));
-  });
+  initRangePicker();
   getEl("search-order").addEventListener("input", renderPreview);
   getEl("select-all-orders").addEventListener("change", onSelectAllChange);
   getEl("preview-body").addEventListener("change", onOrderCheckChange);
@@ -1390,18 +1367,13 @@ function bindMainEvents() {
         hoursWrap.style.display = "flex";
       }
 
-      const displaySummary = getEl("autosync-summary");
-      if (displaySummary) {
-        if (!isEnabled) {
-          displaySummary.textContent = "OFF";
-        } else {
-          if (modeSelect.value === "daily") {
-             displaySummary.textContent = `ON (Daily at ${to24h(th.value, tm.value)})`;
-          } else {
-             displaySummary.textContent = `ON (Every ${hoursInput.value} hours from ${to24h(sh.value, sm.value)})`;
-          }
-        }
-      }
+      renderSyncDisplay(
+        "",
+        isEnabled,
+        modeSelect.value === "daily"
+          ? `Daily at ${to24h(th.value, tm.value)}`
+          : `Every ${hoursInput.value}h from ${to24h(sh.value, sm.value)}`,
+      );
 
       checkChanges();
     }
@@ -1706,6 +1678,22 @@ async function onScrapeShopify() {
   }
 }
 
+// Renders the read-only Auto-Sync summary row (toggle + ON/OFF + schedule).
+function renderSyncDisplay(sfx, enabled, scheduleText) {
+  const toggle = getEl(`toggle-autosync-display${sfx}`);
+  if (toggle) toggle.checked = enabled;
+  const state = getEl(`autosync-state${sfx}`);
+  if (state) {
+    state.textContent = enabled ? "ON" : "OFF";
+    state.classList.toggle("on", enabled);
+  }
+  const schedule = getEl(`autosync-schedule${sfx}`);
+  if (schedule) {
+    schedule.querySelector("span").textContent = enabled ? scheduleText : "Not scheduled";
+    schedule.classList.toggle("muted", !enabled);
+  }
+}
+
 // ─── Push ─────────────────────────────────────────────────────────────────────
 
 async function onPush() {
@@ -1775,31 +1763,174 @@ function dateToDmy(date) {
   return `${p(date.getDate())}/${p(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
-// Auto-inserts the slashes while typing: 25102026 -> 25/10/2026.
-function formatDmyInput(input) {
-  const digits = input.value.replace(/\D/g, "").slice(0, 8);
-  const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean);
-  input.value = parts.join("/");
+// ── Single date-range picker: one field, one popover calendar (click start, then end) ──
+const rangePicker = { view: null, start: null, end: null, hover: null, mode: "days" };
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function isoOf(y, m, d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${y}-${p(m + 1)}-${p(d)}`;
 }
 
-function applyDateRange(range) {
-  const from = getEl("filter-date-from");
-  const to = getEl("filter-date-to");
-  const today = new Date();
-  if (range === "all") {
-    from.value = "";
-    to.value = "";
-  } else if (range === "today") {
-    from.value = to.value = dateToDmy(today);
-  } else if (range === "yesterday") {
-    const y = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-    from.value = to.value = dateToDmy(y);
-  } else {
-    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (Number(range) - 1));
-    from.value = dateToDmy(start);
-    to.value = dateToDmy(today);
-  }
+function initRangePicker() {
+  const trigger = getEl("range-trigger");
+  const pop = getEl("range-pop");
+
+  const open = () => {
+    const now = new Date();
+    const base = dmyToIso(getEl("filter-date-from").value) || isoOf(now.getFullYear(), now.getMonth(), 1);
+    const [y, m] = base.split("-").map(Number);
+    rangePicker.view = { y, m: m - 1 };
+    rangePicker.mode = "days";
+    rangePicker.hover = null;
+    renderRangeCalendar();
+    pop.hidden = false;
+  };
+  const close = () => {
+    pop.hidden = true;
+    // Half-finished pick (start only) counts as a single day.
+    if (rangePicker.start && !rangePicker.end) commitRange(rangePicker.start, rangePicker.start);
+  };
+
+  trigger.addEventListener("click", () => (pop.hidden ? open() : close()));
+  document.addEventListener("click", (e) => {
+    if (!pop.hidden && !e.target.closest("#range-picker")) close();
+  });
+
+  getEl("range-clear").addEventListener("click", (e) => {
+    e.stopPropagation();
+    commitRange("", "");
+    pop.hidden = true;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || pop.hidden) return;
+    pop.hidden = true;
+    syncDateFilterUI(); // discard a half-finished pick
+  });
+  getEl("range-presets").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-preset]");
+    if (!btn) return;
+    const [from, to] = presetRange(btn.dataset.preset);
+    commitRange(from, to);
+    pop.hidden = true;
+  });
+  getEl("range-title").addEventListener("click", () => {
+    rangePicker.mode = rangePicker.mode === "months" ? "days" : "months";
+    renderRangeCalendar();
+  });
+  getEl("range-months").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-month]");
+    if (!btn) return;
+    rangePicker.view.m = Number(btn.dataset.month);
+    rangePicker.mode = "days";
+    renderRangeCalendar();
+  });
+  getEl("range-prev").addEventListener("click", () => shiftRangeMonth(-1));
+  getEl("range-next").addEventListener("click", () => shiftRangeMonth(1));
+
+  const grid = getEl("range-grid");
+  grid.addEventListener("click", (e) => {
+    const cell = e.target.closest("[data-iso]");
+    if (!cell) return;
+    const iso = cell.dataset.iso;
+    if (!rangePicker.start || rangePicker.end) {
+      rangePicker.start = iso;
+      rangePicker.end = null;
+      paintRangeCells();
+    } else {
+      const [from, to] = iso < rangePicker.start ? [iso, rangePicker.start] : [rangePicker.start, iso];
+      commitRange(from, to);
+      pop.hidden = true;
+    }
+  });
+  grid.addEventListener("mouseover", (e) => {
+    const cell = e.target.closest("[data-iso]");
+    if (!cell || !rangePicker.start || rangePicker.end) return;
+    rangePicker.hover = cell.dataset.iso;
+    paintRangeCells();
+  });
+  grid.addEventListener("mouseleave", () => {
+    rangePicker.hover = null;
+    paintRangeCells();
+  });
+  syncDateFilterUI();
+}
+
+function presetRange(preset) {
+  const t = new Date();
+  const at = (offset) => {
+    const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - offset);
+    return isoOf(d.getFullYear(), d.getMonth(), d.getDate());
+  };
+  if (preset === "today") return [at(0), at(0)];
+  if (preset === "yesterday") return [at(1), at(1)];
+  if (preset === "all") return ["", ""];
+  return [at(Number(preset) - 1), at(0)];
+}
+
+function shiftRangeMonth(delta) {
+  const v = rangePicker.view;
+  // In the month view the arrows jump a whole year.
+  const d = rangePicker.mode === "months" ? new Date(v.y + delta, v.m, 1) : new Date(v.y, v.m + delta, 1);
+  rangePicker.view = { y: d.getFullYear(), m: d.getMonth() };
+  renderRangeCalendar();
+}
+
+function commitRange(fromIso, toIso) {
+  getEl("filter-date-from").value = fromIso ? isoToDmy(fromIso) : "";
+  getEl("filter-date-to").value = toIso ? isoToDmy(toIso) : "";
+  syncDateFilterUI();
   onOrderDateFilterChange();
+}
+
+function renderRangeCalendar() {
+  const { y, m } = rangePicker.view;
+  const monthMode = rangePicker.mode === "months";
+  getEl("range-title").textContent = monthMode ? String(y) : `${MONTHS[m]} ${y}`;
+  getEl("range-months").hidden = !monthMode;
+  getEl("range-grid").hidden = monthMode;
+  document.querySelector(".range-week").hidden = monthMode;
+  if (monthMode) {
+    getEl("range-months").innerHTML = MONTHS.map(
+      (name, i) => `<button type="button" class="range-month${i === m ? " active" : ""}" data-month="${i}">${name.slice(0, 3)}</button>`,
+    ).join("");
+    return;
+  }
+  const offset = (new Date(y, m, 1).getDay() + 6) % 7; // week starts Monday
+  const days = new Date(y, m + 1, 0).getDate();
+  const now = new Date();
+  const todayIso = isoOf(now.getFullYear(), now.getMonth(), now.getDate());
+  let html = "";
+  for (let i = 0; i < offset; i++) html += "<span></span>";
+  for (let d = 1; d <= days; d++) {
+    const iso = isoOf(y, m, d);
+    html += `<button type="button" class="range-day${iso === todayIso ? " today" : ""}" data-iso="${iso}">${d}</button>`;
+  }
+  getEl("range-grid").innerHTML = html;
+  paintRangeCells();
+}
+
+function paintRangeCells() {
+  const { start, end, hover } = rangePicker;
+  const b = end || hover || start;
+  const [lo, hi] = start ? (start <= b ? [start, b] : [b, start]) : ["", ""];
+  getEl("range-grid").querySelectorAll("[data-iso]").forEach((cell) => {
+    const iso = cell.dataset.iso;
+    cell.classList.toggle("edge", !!start && (iso === lo || iso === hi));
+    cell.classList.toggle("between", !!start && iso > lo && iso < hi);
+  });
+}
+
+// Mirrors the hidden from/to values into the trigger label and picker state.
+function syncDateFilterUI() {
+  const from = getEl("filter-date-from").value.trim();
+  const to = getEl("filter-date-to").value.trim();
+  const label = getEl("range-label");
+  label.textContent = !from && !to ? "Select date range" : from === to ? from : `${from || "…"} – ${to || "…"}`;
+  label.classList.toggle("placeholder", !from && !to);
+  getEl("range-clear").hidden = !from && !to;
+  rangePicker.start = dmyToIso(from) || null;
+  rangePicker.end = dmyToIso(to) || null;
 }
 
 // Filters by the order creation date (the same date shown in the Date column).
@@ -1860,7 +1991,6 @@ function renderPreview() {
     const qty = o.items.reduce((s, it) => s + (it.quantity || 1), 0);
     tr.innerHTML = `
       <td><input type="checkbox" class="order-check" data-id="${o.id}" ${selectedOrderIds.has(o.id) ? "checked" : ""} /></td>
-      <td>${i + 1}</td>
       <td title="${o.id}">${o.id}</td>
       <td>${date}</td>
       <td class="col-sku" title="${sku}">${trunc(sku, 24)}</td>
@@ -1872,7 +2002,7 @@ function renderPreview() {
 
   const selectedCount = getSelectedOrders().length;
   const total = allScrapedOrders.length;
-  getEl("preview-count").textContent = `${selectedCount} selected · ${orders.length}${total > orders.length ? ` / ${total}` : ""} order(s)`;
+  getEl("preview-count").innerHTML = `<span class="count-selected">${selectedCount} selected</span> <span class="count-total">/ ${total} orders</span>`;
 
   const selectAll = getEl("select-all-orders");
   const visibleSelected = orders.filter((o) => selectedOrderIds.has(o.id)).length;
@@ -1913,6 +2043,7 @@ function clearPreview() {
     const el = getEl(id);
     if (el) el.value = "";
   });
+  syncDateFilterUI();
   const tbody = getEl("preview-body");
   if (tbody) tbody.innerHTML = "";
   const sec = getEl("preview-section");

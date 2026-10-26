@@ -43,8 +43,8 @@
     <section class="section">
       <label class="label">Platform</label>
       <div class="platform-tabs">
-        <button class="platform-tab active" data-platform="etsy">Etsy</button>
-        <button class="platform-tab" data-platform="shopify">Shopify</button>
+        <button class="platform-tab active" data-platform="etsy"><img class="platform-icon" src="../icons/platforms/etsy.svg" alt="" /><span>Etsy</span></button>
+        <button class="platform-tab" data-platform="shopify"><img class="platform-icon" src="../icons/platforms/shopify.svg" alt="" /><span>Shopify</span></button>
       </div>
     </section>
 
@@ -56,7 +56,6 @@
           <span id="store-warning-icon" style="display: none; cursor: default; font-size: 14px;"           title="Store not found in Sellfern">⚠️</span>
           <button id="btn-recheck-store" class="btn-link" style="display: none; font-size: 11px; padding: 0; color: #ff9800; margin-left: 4px;">Re-check</button>
         </label>
-        <button id="btn-detect-shop" class="btn-link" style="font-size: 12px; padding: 0;">Auto Detect</button>
       </div>
       <p id="shopify-hint" class="hint" style="display:none; margin: -4px 0 8px;">
         Open <code>admin.shopify.com/store/&lt;handle&gt;/orders</code>, let the page finish loading orders, then click Auto Detect.
@@ -64,9 +63,10 @@
       <div id="store-warning-text" style="display: none; color: #ff6b6b; font-size: 11px; margin-top: 8px; padding: 6px; background: rgba(255, 107, 107, 0.1); border-radius: 4px; border: 1px solid rgba(255, 107, 107, 0.2);">
         <span id="store-warning-message">🚨 WARNING: Store "<span id="warning-store-name"></span>" is NOT found in Sellfern. Please add it first!</span>
       </div>
-      <div>
+      <div class="store-field">
         <input type="text" id="input-store" class="input" placeholder="Store Name" title="Store Name" readonly />
         <input type="hidden" id="input-shopid" />
+        <button type="button" id="btn-detect-shop" class="btn-detect" title="Detect store name from the current tab"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span id="detect-label">Auto Detect</span></button>
       </div>
 
       <div id="shopify-store-map" style="display:none; margin-top: 10px;">
@@ -98,12 +98,20 @@
     <section class="section" id="section-autosync">
       <div id="sync-card" class="sync-card active">
         <!-- Display Mode -->
-        <div id="autosync-display" style="display: flex; justify-content: space-between; align-items: center; padding: 4px;">
-          <div style="display: flex; flex-direction: column; gap: 4px;">
-             <div class="sync-title" style="margin: 0;"><span>🔄</span> Auto-Sync <span style="font-size: 10px; font-weight: normal; color: var(--muted);">(Only syncs 'New' orders)</span></div>
-             <div id="autosync-summary" style="font-size: 12px; color: var(--muted);">OFF</div>
+        <div id="autosync-display" class="sync-display">
+          <div class="sync-display-main">
+            <div class="sync-display-top">
+              <span class="sync-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 0-15.5-6.2L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.5 6.2L21 16"/><path d="M16 16h5v5"/></svg></span>
+              <span class="sync-name">Auto-Sync</span>
+            <span class="sync-pill">Only syncs ‘New’ orders</span>
+            </div>
+            <div class="sync-display-bottom">
+              <span class="sync-state" id="autosync-state" title="Click Edit to turn Auto-Sync on or off">OFF</span>
+              <span class="sync-divider"></span>
+              <span class="sync-schedule" id="autosync-schedule"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h7"/><path d="M3 10h18"/><path d="M8 2.5v3"/><path d="M16 2.5v3"/><circle cx="18" cy="18" r="4"/><path d="M18 16.3V18l1.2.8"/></svg><span>Not scheduled</span></span>
+            </div>
           </div>
-          <button id="btn-edit-sync" class="btn-link" style="font-size: 13px; margin: 0; padding: 4px 8px;">Edit</button>
+          <button id="btn-edit-sync" class="sync-edit-btn" type="button" title="Change Auto-Sync settings"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3l4 4L8 20l-5 1 1-5z"/></svg> Edit</button>
         </div>
 
         <!-- Editor Mode -->
@@ -168,12 +176,19 @@
     <section class="section" id="section-autosync-shopify" style="display:none;">
       <div id="sync-card-shopify" class="sync-card active">
         <!-- Display Mode -->
-        <div id="autosync-display-shopify" style="display: flex; justify-content: space-between; align-items: center; padding: 4px;">
-          <div style="display: flex; flex-direction: column; gap: 4px;">
-             <div class="sync-title" style="margin: 0;"><span>🔄</span> Auto-Sync</div>
-             <div id="autosync-summary-shopify" style="font-size: 12px; color: var(--muted);">OFF</div>
+        <div id="autosync-display-shopify" class="sync-display">
+          <div class="sync-display-main">
+            <div class="sync-display-top">
+              <span class="sync-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 0-15.5-6.2L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.5 6.2L21 16"/><path d="M16 16h5v5"/></svg></span>
+              <span class="sync-name">Auto-Sync</span>
+            </div>
+            <div class="sync-display-bottom">
+              <span class="sync-state" id="autosync-state-shopify" title="Click Edit to turn Auto-Sync on or off">OFF</span>
+              <span class="sync-divider"></span>
+              <span class="sync-schedule" id="autosync-schedule-shopify"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h7"/><path d="M3 10h18"/><path d="M8 2.5v3"/><path d="M16 2.5v3"/><circle cx="18" cy="18" r="4"/><path d="M18 16.3V18l1.2.8"/></svg><span>Not scheduled</span></span>
+            </div>
           </div>
-          <button id="btn-edit-sync-shopify" class="btn-link" style="font-size: 13px; margin: 0; padding: 4px 8px;">Edit</button>
+          <button id="btn-edit-sync-shopify" class="sync-edit-btn" type="button" title="Change Auto-Sync settings"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3l4 4L8 20l-5 1 1-5z"/></svg> Edit</button>
         </div>
 
         <!-- Editor Mode -->
@@ -287,32 +302,46 @@
     <div class="preview-section" id="preview-section" style="display:none;">
       <div class="preview-header">
         <span id="preview-count">0 orders found</span>
-        <button class="btn-link" id="btn-clear">Clear</button>
+        <button type="button" class="btn-clear" id="btn-clear">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          Clear
+        </button>
       </div>
-      <div style="display: flex; gap: 6px; align-items: center;">
-        <label class="label" for="filter-date-from" style="margin: 0; white-space: nowrap;">Order date</label>
-        <span style="position: relative; flex: 1; min-width: 0; display: inline-flex;">
-          <input type="text" id="filter-date-from" class="input" placeholder="dd/mm/yyyy" maxlength="10" inputmode="numeric" autocomplete="off" style="width: 100%; cursor: pointer;" />
-          <input type="date" id="filter-date-from-picker" tabindex="-1" aria-hidden="true" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;" />
-        </span>
-        <span>–</span>
-        <span style="position: relative; flex: 1; min-width: 0; display: inline-flex;">
-          <input type="text" id="filter-date-to" class="input" placeholder="dd/mm/yyyy" maxlength="10" inputmode="numeric" autocomplete="off" style="width: 100%; cursor: pointer;" />
-          <input type="date" id="filter-date-to-picker" tabindex="-1" aria-hidden="true" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;" />
-        </span>
-      </div>
-      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-        <button type="button" class="btn-link" data-date-range="today">Today</button>
-        <button type="button" class="btn-link" data-date-range="yesterday">Yesterday</button>
-        <button type="button" class="btn-link" data-date-range="7">Last 7 days</button>
-        <button type="button" class="btn-link" data-date-range="30">Last 30 days</button>
-        <button type="button" class="btn-link" data-date-range="all">All</button>
-      </div>
+      <div class="date-filter">
       <input type="text" id="search-order" class="input" placeholder="Search Order ID…" autocomplete="off" />
+        <div class="range-picker" id="range-picker">
+          <button type="button" class="range-trigger" id="range-trigger">
+            <span class="date-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 10h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/></svg></span>
+            <span class="range-label placeholder" id="range-label">Select date range</span>
+            <span class="range-clear" id="range-clear" role="button" aria-label="Clear date range" hidden>×</span>
+            <span class="date-caret" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span>
+          </button>
+          <input type="hidden" id="filter-date-from" />
+          <input type="hidden" id="filter-date-to" />
+          <div class="range-pop" id="range-pop" hidden>
+            <div class="range-presets" id="range-presets">
+              <button type="button" data-preset="today">Today</button>
+              <button type="button" data-preset="yesterday">Yesterday</button>
+              <button type="button" data-preset="7">Last 7 days</button>
+              <button type="button" data-preset="30">Last 30 days</button>
+              <button type="button" data-preset="90">Last 90 days</button>
+              <button type="button" data-preset="all">All</button>
+            </div>
+            <div class="range-nav">
+              <button type="button" class="range-nav-btn" id="range-prev" aria-label="Previous month"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+              <button type="button" class="range-title" id="range-title" title="Pick month / year"></button>
+              <button type="button" class="range-nav-btn" id="range-next" aria-label="Next month"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+            </div>
+            <div class="range-week"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
+            <div class="range-grid" id="range-grid"></div>
+            <div class="range-months" id="range-months" hidden></div>
+          </div>
+        </div>
+      </div>
       <div class="table-wrap">
         <table class="preview-table">
           <thead>
-            <tr><th><input type="checkbox" id="select-all-orders" title="Select all" checked /></th><th>#</th><th>Order ID</th><th>Date</th><th class="col-sku">SKU</th><th>Qty</th><th>Total</th></tr>
+            <tr><th><input type="checkbox" id="select-all-orders" title="Select all" checked /></th><th>Order ID</th><th>Date</th><th class="col-sku">SKU</th><th>Qty</th><th>Total</th></tr>
           </thead>
           <tbody id="preview-body"></tbody>
         </table>
