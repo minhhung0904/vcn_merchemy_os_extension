@@ -95,6 +95,7 @@ The content script runs **inside the Etsy tab** so your session cookies are auto
 | `transaction.product.product_identifier` | `OrderItem.sku` |
 | `transaction.product.title` | `OrderItem.name` |
 | `transaction.variations` | `OrderItem.variations` |
+| `transaction.variations` (property "Size") | `OrderItem.size` |
 | `notes.note_from_buyer` | `OrderItem.personalization` |
 
 ---

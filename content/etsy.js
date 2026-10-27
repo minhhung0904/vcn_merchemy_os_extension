@@ -727,6 +727,8 @@
     // A variation titled "Color" or "Colour" maps straight to the CMS's own color column.
     const colorVariation = variations.find(v => /^colou?r$/i.test(String(v.property || '').trim()));
     const color = colorVariation ? colorVariation.value : '';
+    const sizeVariation = variations.find(v => /^size$/i.test(String(v.property || '').trim()));
+    const size = sizeVariation ? sizeVariation.value : '';
 
     const imageUrl = getItemImage(tx, product);
 
@@ -755,6 +757,7 @@
       price,
       variations:      variationStr,
       color,
+      size,
       imageUrl,
       personalization: orderCtx.buyerNote,
       customOptions,

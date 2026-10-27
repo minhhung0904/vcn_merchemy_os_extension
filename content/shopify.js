@@ -139,7 +139,13 @@
       }];
     }
 
-    return edges.map(({ node: li }) => ({
+    return edges.map(({ node: li }) => {
+      // Option list shape varies by query; accept both {name,value} and {name,values}.
+      const options = li.variant?.selectedOptions || li.selectedOptions || [];
+      const sizeOpt = options.find((o) => /^size$/i.test(String(o.name || '').trim()));
+      const size = sizeOpt ? String(sizeOpt.value ?? sizeOpt.values?.[0] ?? '') : '';
+      return {
+      size,
       id: gidToId(li.id),
       name: li.title || li.name || 'Unknown product',
       sku: li.sku || li.variant?.sku || '',
@@ -150,7 +156,8 @@
       personalization: '',
       ...orderCtx,
       status: orderCtx.fulfillmentStatus,
-    }));
+      };
+    });
   }
 
   function mapOrder(node, storeName) {
