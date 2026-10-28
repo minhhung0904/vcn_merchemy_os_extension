@@ -348,6 +348,7 @@ document.addEventListener("DOMContentLoaded", () => {
   storage.remove(["flowApiToken", "flowOrgName"]);
 
   bindSettingsEvents();
+  bindEtsyTrackingPush();
   bindMainEvents();
   checkAuth();
 });
@@ -2113,3 +2114,42 @@ const storage = {
   set: (data) => new Promise((r) => chrome.storage.local.set(data, r)),
   remove: (keys) => new Promise((r) => chrome.storage.local.remove(keys, r)),
 };
+
+
+// ─── Etsy tracking push (see etsy-tracking.js) ──────────────────────────────
+
+function describeEtsyTrackingStatus(status) {
+  if (!status) return "Not run yet";
+  const when = new Date(status.time).toLocaleString();
+  if (!status.ok) return `Failed ${when}: ${status.error}`;
+  return `${when} — ${status.pushed} pushed, ${status.already} already on Etsy, ${status.failed} failed`;
+}
+
+function bindEtsyTrackingPush() {
+  const button = document.getElementById("set-btn-etsy-push");
+  const statusEl = document.getElementById("set-etsy-push-status");
+  if (!button || !statusEl) return;
+
+  chrome.storage.local.get(["etsyTrackingStatus"], ({ etsyTrackingStatus }) => {
+    statusEl.textContent = describeEtsyTrackingStatus(etsyTrackingStatus);
+  });
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    statusEl.textContent = "Pushing…";
+    try {
+      const result = await chrome.runtime.sendMessage({ type: "PUSH_ETSY_TRACKING_NOW" });
+      if (!result?.ok) {
+        statusEl.textContent = `Failed: ${result?.error || "unknown error"}`;
+      } else if (result.skipped) {
+        statusEl.textContent = "A push is already running";
+      } else {
+        statusEl.textContent = `${result.pushed} pushed, ${result.already} already on Etsy, ${result.failed} failed`;
+      }
+    } catch (err) {
+      statusEl.textContent = `Failed: ${err.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
