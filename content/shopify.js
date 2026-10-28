@@ -143,7 +143,11 @@
       // Option list shape varies by query; accept both {name,value} and {name,values}.
       const options = li.variant?.selectedOptions || li.selectedOptions || [];
       const sizeOpt = options.find((o) => /^size$/i.test(String(o.name || '').trim()));
-      const size = sizeOpt ? String(sizeOpt.value ?? sizeOpt.values?.[0] ?? '') : '';
+      // "Phone Model" (e.g. phone case listings) is treated as the item's size for Sellfern sync purposes.
+      const phoneModelOpt = options.find((o) => /^phone\s*model$/i.test(String(o.name || '').trim()));
+      const sizeVal = sizeOpt ? String(sizeOpt.value ?? sizeOpt.values?.[0] ?? '') : '';
+      const phoneModelVal = phoneModelOpt ? String(phoneModelOpt.value ?? phoneModelOpt.values?.[0] ?? '') : '';
+      const size = [sizeVal, phoneModelVal].filter(Boolean).join(' | ');
       return {
       size,
       id: gidToId(li.id),

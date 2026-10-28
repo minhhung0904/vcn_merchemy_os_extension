@@ -728,7 +728,9 @@
     const colorVariation = variations.find(v => /^colou?r$/i.test(String(v.property || '').trim()));
     const color = colorVariation ? colorVariation.value : '';
     const sizeVariation = variations.find(v => /^size$/i.test(String(v.property || '').trim()));
-    const size = sizeVariation ? sizeVariation.value : '';
+    // "Phone Model" (e.g. phone case listings) is treated as the item's size for Sellfern sync purposes.
+    const phoneModelVariation = variations.find(v => /^phone\s*model$/i.test(String(v.property || '').trim()));
+    const size = [sizeVariation?.value, phoneModelVariation?.value].filter(Boolean).join(' | ');
 
     const imageUrl = getItemImage(tx, product);
 
