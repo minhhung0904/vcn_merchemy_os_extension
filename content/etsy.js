@@ -27,18 +27,11 @@
   const capturedOrdersCache = new Map(); // orderId -> raw order object
   const capturedBuyersMap = {}; // buyer_id -> buyer object, merged across pages
 
-  const capturedPersonalizationFiles = new Map(); // orderId -> raw personalization-files response
-
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const data = event.data;
     if (!data || !data.__sellfern) return;
 
-    if (data.type === 'PERSONALIZATION_FILES') {
-      const { orderId, data: files } = data.payload || {};
-      if (orderId) capturedPersonalizationFiles.set(String(orderId), files);
-      return;
-    }
     if (data.type !== 'ORDERS_DATA_PAGE') return;
 
     const { orders = [], buyers = [] } = data.payload || {};
@@ -976,49 +969,48 @@
     });
   }
 
-  // Attachments the buyer uploaded for personalization. The page fetches
-  // them itself when the detail view opens (captured in etsy-main.js), so
-  // wait briefly for that response instead of making our own request. The
-  // response shape isn't confirmed, so collect every http(s) URL in it.
-  async function getPersonalizationFileUrls(orderId, timeoutMs = 4000) {
-    const key = String(orderId);
-    const deadline = Date.now() + timeoutMs;
-    while (!capturedPersonalizationFiles.has(key) && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    const data = capturedPersonalizationFiles.get(key);
-
-    // Etsy returns the same upload in several sizes (il_75x75.<id>.jpg,
-    // il_fullxfull.<id>.jpg, ...). Each URL also remembers the nearest
-    // transaction/listing id found among its ancestors so it can be matched
-    // to an order item.
-    // Every Etsy image URL is first rewritten to its fullxfull form, then
-    // exact duplicates are dropped (first occurrence wins, keeping Etsy's order).
-    // Any "<prefix>_<size>." filename (personalization uploads use "ipf_",
-    // listing photos "il_", others may exist), so the prefix isn't hardcoded.
+  // Attachments the buyer uploaded for personalization, read from the images
+  // the order detail view already renders (no API call). Uploads live under
+  // /ipf/ on etsystatic; listing photos are under /il/. Each image remembers
+  // the transaction id of its nearest ancestor that links to exactly one
+  // /transaction/<id> (or, failing that, one /listing/<id>) so it can be
+  // matched to an order item.
+  //
+  // Etsy renders the same upload in several sizes (ipf_75x75.<id>.jpg,
+  // ipf_fullxfull.<id>.jpg, ...), so every URL is rewritten to its fullxfull
+  // form and exact duplicates are dropped (first occurrence wins, keeping the
+  // page's order). The prefix isn't hardcoded: any "<prefix>_<size>." filename.
+  // `items` are the mapped items of the order being pushed: images that
+  // belong to a different transaction (another order still in the DOM) are
+  // skipped.
+  function getPersonalizationFileUrls(items = []) {
     const SIZE_RE = /\/([a-z]+)_(?:fullxfull|\d+x(?:\d+|N))\.(?=[^/]*$)/i;
     const toFullSize = (u) => u.split(/([?#])/).map((part, i) => (i === 0 ? part.replace(SIZE_RE, '/$1_fullxfull.') : part)).join('');
-    const byFile = new Map();
-    (function walk(v, ctx) {
-      if (typeof v === 'string') {
-        if (!/^https?:\/\//.test(v)) return;
-        const url = toFullSize(v);
-        const key = url.split(/[?#]/)[0];
-        if (!byFile.has(key)) byFile.set(key, { url, ctx });
-      }
-      else if (Array.isArray(v)) v.forEach((x) => walk(x, ctx));
-      else if (v && typeof v === 'object') {
-        const tx = getV(v, 'transaction_id', 'transactionId');
-        const listing = getV(v, 'listing_id', 'listingId');
-        const next = (tx != null || listing != null)
-          ? { transactionId: tx != null ? String(tx) : ctx?.transactionId, listingId: listing != null ? String(listing) : ctx?.listingId }
-          : ctx;
-        Object.values(v).forEach((x) => walk(x, next));
-      }
-    })(data, null);
+    const idsIn = (root, kind) => new Set(Array.from(root.querySelectorAll(`a[href*="/${kind}/"]`))
+      .map((a) => (a.getAttribute('href').match(new RegExp(`/${kind}/(\d+)`)) || [])[1]).filter(Boolean));
+    const orderTx = new Set(items.map((item) => String(item.transactionId)));
 
-    const files = Array.from(byFile.values());
-    return files;
+    const byFile = new Map();
+    document.querySelectorAll('img[src*="/ipf/"], img[srcset*="/ipf/"], source[srcset*="/ipf/"], a[href*="/ipf/"]').forEach((el) => {
+      const raw = [el.getAttribute('src'), el.getAttribute('href'), ...(el.getAttribute('srcset') || '').split(',').map((s) => s.trim().split(/\s+/)[0])];
+      const found = raw.find((u) => u && /^https?:\/\/[^/]*etsystatic\.com\/ipf\//.test(u));
+      if (!found) return;
+
+      let ctx = null;
+      for (let p = el.parentElement, depth = 0; p && depth < 12 && !ctx; p = p.parentElement, depth++) {
+        const tx = idsIn(p, 'transaction');
+        if (tx.size === 1) { ctx = { transactionId: [...tx][0] }; break; }
+        const listing = idsIn(p, 'listing');
+        if (listing.size === 1) ctx = { listingId: [...listing][0] };
+      }
+      if (ctx?.transactionId && orderTx.size && !orderTx.has(ctx.transactionId)) return;
+
+      const url = toFullSize(found);
+      const key = url.split(/[?#]/)[0];
+      if (!byFile.has(key)) byFile.set(key, { url, ctx });
+    });
+
+    return Array.from(byFile.values());
   }
 
   // Etsy has no AJAX endpoint that returns one order's full detail (confirmed
@@ -1068,14 +1060,18 @@
       const customLines = [];
       if (mapped.buyerNote) customLines.push(`Buyer note: ${mapped.buyerNote}`);
       (mapped.privateNotes || []).forEach((n) => customLines.push(`Seller note: ${n}`));
-      const files = await getPersonalizationFileUrls(orderId);
+      const files = getPersonalizationFileUrls(mapped.items || []);
       const customText = customLines.join('\n');
       const storeName = defaultStore || '';
       const items = mapped.items || [];
-      const itemOf = (f) => items.findIndex((item) => f.ctx && (
-        (f.ctx.transactionId && f.ctx.transactionId === String(item.transactionId)) ||
-        (!f.ctx.transactionId && f.ctx.listingId && f.ctx.listingId === String(item.listingId))
-      ));
+      const itemOf = (f) => {
+        const idx = items.findIndex((item) => f.ctx && (
+          (f.ctx.transactionId && f.ctx.transactionId === String(item.transactionId)) ||
+          (!f.ctx.transactionId && f.ctx.listingId && f.ctx.listingId === String(item.listingId))
+        ));
+        // A single-item order has nothing else the file could belong to.
+        return idx < 0 && items.length === 1 ? 0 : idx;
+      };
       // In the order Etsy lists them, named after the item they belong to.
       const slug = (s) => String(s || '').replace(/[\\/:*?"<>|#%]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
       const attachments = files.map((f, i) => {
