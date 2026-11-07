@@ -29,7 +29,7 @@
   // the page has already fetched its first orders list, so a one-shot
   // postMessage would be lost. Keep everything captured here and replay it on
   // request.
-  const store = { orders: new Map(), buyers: new Map(), files: new Map() };
+  const store = { orders: new Map(), buyers: new Map() };
 
   function replayAll() {
     if (store.orders.size || store.buyers.size) {
@@ -38,7 +38,6 @@
         buyers: Array.from(store.buyers.values()),
       });
     }
-    store.files.forEach((data, orderId) => post('PERSONALIZATION_FILES', { orderId, data }));
   }
 
   window.addEventListener('message', (event) => {
@@ -80,23 +79,6 @@
     post('ORDERS_DATA_PAGE', { orders, buyers });
   }
 
-  // Buyer-uploaded personalization attachments, fetched by the page itself
-  // when an order's detail view opens: .../personalization-files/<orderId>.
-  const PERSONALIZATION_RE = /\/mission-control\/orders\/personalization-files\/(\d+)/;
-
-  function tryCapturePersonalizationFiles(url, jsonText) {
-    const m = url.match(PERSONALIZATION_RE);
-    if (!m) return;
-    let json;
-    try {
-      json = JSON.parse(jsonText);
-    } catch (_) {
-      return;
-    }
-    store.files.set(m[1], json);
-    post('PERSONALIZATION_FILES', { orderId: m[1], data: json });
-  }
-
   // ─── Patch fetch ────────────────────────────────────────────────────────
   const origFetch = window.fetch;
   window.fetch = async function (input, init) {
@@ -107,11 +89,6 @@
       try {
         const text = await res.clone().text();
         tryCaptureOrdersData(url, text);
-      } catch (_) {}
-    } else if (PERSONALIZATION_RE.test(url)) {
-      try {
-        const text = await res.clone().text();
-        tryCapturePersonalizationFiles(url, text);
       } catch (_) {}
     }
     return res;
@@ -129,10 +106,6 @@
     if (isOrdersListUrl(url)) {
       this.addEventListener('loadend', () => {
         tryCaptureOrdersData(url, this.responseText || '');
-      });
-    } else if (PERSONALIZATION_RE.test(url)) {
-      this.addEventListener('loadend', () => {
-        tryCapturePersonalizationFiles(url, this.responseText || '');
       });
     }
     return origSend.apply(this, arguments);
