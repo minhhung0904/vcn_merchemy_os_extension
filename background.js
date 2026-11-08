@@ -2,7 +2,7 @@
 // Handles API communication with Sellfern backend
 
 import { DEFAULT_API_URL } from './config.js';
-import { registerEtsyTracking, runTrackingPush } from './etsy-tracking.js';
+import { registerEtsyTracking, runTrackingPush, syncTrackingAlarm } from './etsy-tracking.js';
 
 // Etsy OAuth callback capture + hourly tracking push (see etsy-tracking.js).
 registerEtsyTracking();
@@ -50,6 +50,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       },
     );
+    return true;
+  }
+
+  if (message.type === "UPDATE_ETSY_TRACKING_ALARM") {
+    syncTrackingAlarm({ force: true })
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 

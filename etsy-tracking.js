@@ -4,15 +4,22 @@
 // network. Sellfern only keeps the queue and the tokens:
 //   1. Connect:  Etsy redirects to http://localhost:8080/callback; we read code+state from that
 //                navigation and hand them to Sellfern, which stores the tokens.
-//   2. Push:     every hour (and on demand) we claim the pending rows from Sellfern, call the Etsy
-//                API for each one and report the outcome back.
+//   2. Push:     on a schedule the user sets in the popup (Push Tracking tab: daily at a time, or
+//                every N hours from a start time; default every hour, can be turned off) and on demand, we claim the pending rows from Sellfern, call
+//                the Etsy API for each one and report the outcome back. Only the Etsy store this
+//                extension detected (defaultStore, set by Auto Detect) is pushed.
 
 import { DEFAULT_API_URL, ETSY_CALLBACK_HOST, ETSY_CALLBACK_PORT, ETSY_CALLBACK_PATH } from "./config.js";
 
 const ETSY_API_BASE = "https://openapi.etsy.com/v3/application";
 const ETSY_TOKEN_URL = "https://api.etsy.com/v3/public/oauth/token";
 const ALARM_NAME = "etsyTrackingPush";
-const PUSH_PERIOD_MINUTES = 60;
+// Auto push settings live in chrome.storage.local under this key. Keep the default in sync with
+// ETSY_AUTO_PUSH_DEFAULT in popup/popup.js.
+const AUTO_PUSH_KEY = "etsyAutoPush";
+const DEFAULT_AUTO_PUSH = { enabled: true, mode: "hourly", time: "00:00", hours: 1, startTime: "00:00" };
+// The schedule the current alarm was created from, so a service worker restart keeps it as is.
+const SCHEDULED_KEY = "etsyAutoPushScheduled";
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 let pushRunning = false;
@@ -48,12 +55,14 @@ async function sellfernFetch(path, { method = "GET", body } = {}) {
     headers: { "Content-Type": "application/json", "x-api-key": apiToken },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) throw new Error("Invalid or expired API token. Please update it in the extension Settings.");
+  if (res.status === 401) {
+    throw Object.assign(new Error("Invalid or expired API token. Please update it in the extension Settings."), { status: 401 });
+  }
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message = json?.error?.message || json?.error || json?.message || `Sellfern API error ${res.status}`;
-    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+    throw Object.assign(new Error(typeof message === "string" ? message : JSON.stringify(message)), { status: res.status });
   }
   return json.success && "data" in json ? json.data : json;
 }
@@ -258,59 +267,132 @@ async function reportResults(results) {
   await sellfernFetch("/stores/etsy/tracking-queue/results", { method: "POST", body: { results } });
 }
 
+// Safety stop for a manual run: 200 batches of 50 = 10,000 tracking numbers.
+const MAX_MANUAL_BATCHES = 200;
+
+// Pushes one claimed store batch to Etsy, reports the outcome, and adds it to `summary`.
+// Returns { rateLimited } so a manual run can stop instead of hammering Etsy.
+async function pushStoreBatch(store, summary) {
+  const results = [];
+  let rateLimited = false;
+  for (let i = 0; i < store.items.length; i += 1) {
+    const item = store.items[i];
+    try {
+      await ensureFreshToken(store);
+      const outcome = await pushTrackingItem(store, item);
+      results.push({ queueId: item.queueId, success: true });
+      if (outcome.already) summary.already += 1;
+      else summary.pushed += 1;
+    } catch (err) {
+      const retryable = err instanceof EtsyCallError ? err.retryable : true;
+      results.push({ queueId: item.queueId, success: false, error: err.message, retryable });
+      summary.failed += 1;
+
+      const deadToken = err instanceof EtsyCallError && !err.retryable && /refresh|Reconnect/i.test(err.message);
+      const tooFast = err instanceof EtsyCallError && err.status === 429;
+      if (deadToken || tooFast) {
+        // A dead token fails every other item the same way; after a 429 Etsy wants us to back off.
+        // Untouched items go back to the queue (retryable) or fail with the token error.
+        const message = tooFast ? "Not sent: Etsy rate limit reached, will retry later" : err.message;
+        store.items.slice(i + 1).forEach((r) => {
+          results.push({ queueId: r.queueId, success: false, error: message, retryable: tooFast });
+          if (!tooFast) summary.failed += 1;
+        });
+        rateLimited = tooFast;
+        break;
+      }
+    }
+    await jitter(600, 1800);
+  }
+  await reportResults(results);
+  return { rateLimited };
+}
+
+// On an auto run these mean "this extension is not set up for tracking push" rather than a failure:
+// bad token (401), token without the tracking scope or not an admin (403), a Sellfern server that
+// does not have the tracking endpoints yet (404). Auto runs skip them without logging every hour.
+const NOT_SET_UP_STATUSES = new Set([401, 403, 404]);
+
+// What the popup shows when tracking push is not set up. Kept out of the logs on purpose.
+const SETUP_ISSUE_KEY = "etsyTrackingSetupIssue";
+const SETUP_MESSAGES = {
+  401: "Your API Token is invalid or expired. Update it in Settings.",
+  403: "Your API Token cannot push tracking. Use a token of an Admin user that has the orders:status:write scope (Sellfern → Settings → API Tokens), then update it in Settings.",
+  404: "This Sellfern server does not support Etsy tracking push yet.",
+};
+
+async function setSetupIssue(issue) {
+  await storageSet({ [SETUP_ISSUE_KEY]: issue ? { ...issue, time: Date.now() } : null });
+}
+
+function sendProgress(progress) {
+  chrome.runtime.sendMessage({ type: "ETSY_TRACKING_PROGRESS", ...progress }).catch(() => {});
+}
+
+// Auto runs push one batch (up to 50). A manual run keeps claiming batches of the detected store
+// until its queue is empty, Etsy rate-limits us, or the safety limit is hit.
 export async function runTrackingPush({ manual = false } = {}) {
   if (pushRunning) return { ok: true, skipped: "already running" };
   pushRunning = true;
 
   const summary = { pushed: 0, failed: 0, already: 0 };
+  let storeName = "";
+  let stopReason = "";
   try {
-    const { apiToken } = await storageGet("apiToken");
+    const { apiToken, defaultStore } = await storageGet(["apiToken", "defaultStore"]);
     if (!apiToken) return { ok: false, error: "No API token configured" };
+    storeName = String(defaultStore || "").trim();
+    if (!storeName) {
+      if (!manual) return { ok: true, skipped: "no store detected" };
+      throw new Error("No Etsy store detected. Open your Etsy shop and click Auto Detect in the Get Orders tab.");
+    }
 
-    const queue = await sellfernFetch("/stores/etsy/tracking-queue");
-    const stores = queue?.stores || [];
+    let afterId = manual ? 0 : null;
+    for (let batch = 1; ; batch += 1) {
+      const query = new URLSearchParams({ storeName });
+      if (afterId !== null) query.set("afterId", String(afterId));
+      const queue = await sellfernFetch(`/stores/etsy/tracking-queue?${query}`);
+      if (batch === 1) await setSetupIssue(null); // Sellfern accepted the token and the store
+      const stores = queue?.stores || [];
 
-    for (const store of stores) {
-      const results = [];
-      for (const item of store.items) {
-        try {
-          await ensureFreshToken(store);
-          const outcome = await pushTrackingItem(store, item);
-          results.push({ queueId: item.queueId, success: true });
-          if (outcome.already) summary.already += 1;
-          else summary.pushed += 1;
-        } catch (err) {
-          const retryable = err instanceof EtsyCallError ? err.retryable : true;
-          results.push({ queueId: item.queueId, success: false, error: err.message, retryable });
-          summary.failed += 1;
-          // A dead token will fail every other item of this store the same way.
-          if (err instanceof EtsyCallError && !err.retryable && /refresh|Reconnect/i.test(err.message)) {
-            const rest = store.items.slice(store.items.indexOf(item) + 1);
-            rest.forEach((r) => {
-              results.push({ queueId: r.queueId, success: false, error: err.message, retryable: false });
-              summary.failed += 1;
-            });
-            break;
-          }
-        }
-        await jitter(600, 1800);
+      let rateLimited = false;
+      for (const store of stores) {
+        ({ rateLimited } = await pushStoreBatch(store, summary));
+        if (rateLimited) break;
       }
-      await reportResults(results);
+
+      if (!manual) break;
+      if (rateLimited) { stopReason = "Etsy rate limit reached, the rest stays in the queue"; break; }
+      if (!queue?.lastId) break; // nothing left for this store
+      if (batch >= MAX_MANUAL_BATCHES) { stopReason = `Stopped after ${batch} batches, click Push now again for the rest`; break; }
+
+      afterId = queue.lastId;
+      sendProgress({ storeName, batch, ...summary });
       await jitter(1000, 3000);
     }
 
-    if (summary.pushed || summary.failed || summary.already) {
+    const didWork = summary.pushed || summary.failed || summary.already;
+    if (!manual && !didWork) return { ok: true, ...summary };
+
+    if (didWork) {
       await addLog(
-        summary.failed ? "warning" : "success",
-        `Etsy tracking: ${summary.pushed} pushed, ${summary.already} already on Etsy, ${summary.failed} failed`
+        summary.failed || stopReason ? "warning" : "success",
+        `Etsy tracking (${storeName}): ${summary.pushed} pushed, ${summary.already} already on Etsy, ${summary.failed} failed${stopReason ? `. ${stopReason}` : ""}`
       );
     }
-    await storageSet({ etsyTrackingStatus: { ok: true, time: Date.now(), manual, ...summary } });
-    return { ok: true, ...summary };
+    await storageSet({ etsyTrackingStatus: { ok: true, time: Date.now(), manual, storeName, stopReason, ...summary } });
+    return { ok: true, stopReason, ...summary };
   } catch (err) {
+    const didWork = summary.pushed || summary.failed || summary.already;
+    if (NOT_SET_UP_STATUSES.has(err.status)) {
+      await setSetupIssue({ status: err.status, message: SETUP_MESSAGES[err.status], detail: err.message });
+      if (!manual && !didWork) return { ok: true, skipped: err.message };
+    }
     await addLog("error", `Etsy tracking push failed: ${err.message}`);
-    await storageSet({ etsyTrackingStatus: { ok: false, time: Date.now(), manual, error: err.message } });
-    return { ok: false, error: err.message };
+    await storageSet({
+      etsyTrackingStatus: { ok: false, time: Date.now(), manual, storeName, error: err.message, ...summary },
+    });
+    return { ok: false, error: err.message, ...summary };
   } finally {
     pushRunning = false;
   }
@@ -318,14 +400,57 @@ export async function runTrackingPush({ manual = false } = {}) {
 
 // ─── Registration (call once from the service worker's top level) ────────────
 
-async function ensureAlarm() {
+function parseTime(value, fallback) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || ""));
+  const hh = m ? Number(m[1]) : NaN;
+  const mm = m ? Number(m[2]) : NaN;
+  if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) return { hh, mm };
+  return parseTime(fallback, "00:00");
+}
+
+async function getAutoPushSettings() {
+  const stored = (await storageGet(AUTO_PUSH_KEY))[AUTO_PUSH_KEY] || {};
+  const settings = { ...DEFAULT_AUTO_PUSH, ...stored };
+  settings.mode = settings.mode === "daily" ? "daily" : "hourly";
+  const hours = Number(settings.hours);
+  settings.hours = Number.isInteger(hours) && hours >= 1 && hours <= 24 ? hours : DEFAULT_AUTO_PUSH.hours;
+  return settings;
+}
+
+// Same rules as setupSyncAlarm in background.js (Get Orders Auto-Sync).
+function nextRunFor(settings, now = new Date()) {
+  if (settings.mode === "daily") {
+    const { hh, mm } = parseTime(settings.time, DEFAULT_AUTO_PUSH.time);
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+    return { when: next.getTime(), periodInMinutes: 1440 };
+  }
+  const { hh, mm } = parseTime(settings.startTime, DEFAULT_AUTO_PUSH.startTime);
+  const stepMs = settings.hours * 60 * 60 * 1000;
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+  while (next.getTime() <= now.getTime()) next.setTime(next.getTime() + stepMs);
+  return { when: next.getTime(), periodInMinutes: settings.hours * 60 };
+}
+
+// Creates, reschedules or removes the alarm so it matches the auto push settings. Runs on every
+// service worker start, so without `force` an alarm made from the same schedule is left alone.
+export async function syncTrackingAlarm({ force = false } = {}) {
+  const settings = await getAutoPushSettings();
+  if (!settings.enabled) {
+    await chrome.alarms.clear(ALARM_NAME);
+    await storageSet({ [SCHEDULED_KEY]: null });
+    return;
+  }
+  const signature = settings.mode === "daily"
+    ? `daily@${settings.time}`
+    : `hourly/${settings.hours}@${settings.startTime}`;
   const existing = await chrome.alarms.get(ALARM_NAME);
-  if (existing) return;
-  // Random first run so extensions installed together do not fire in the same minute.
-  chrome.alarms.create(ALARM_NAME, {
-    delayInMinutes: 1 + Math.random() * 4,
-    periodInMinutes: PUSH_PERIOD_MINUTES,
-  });
+  const scheduled = (await storageGet(SCHEDULED_KEY))[SCHEDULED_KEY];
+  if (!force && existing && scheduled === signature) return;
+
+  await chrome.alarms.clear(ALARM_NAME);
+  chrome.alarms.create(ALARM_NAME, nextRunFor(settings));
+  await storageSet({ [SCHEDULED_KEY]: signature });
 }
 
 export function registerEtsyTracking() {
@@ -341,11 +466,17 @@ export function registerEtsyTracking() {
     if (url) handleCallbackNavigation(url, tabId);
   });
 
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === ALARM_NAME) runTrackingPush();
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name !== ALARM_NAME) return;
+    // Guard against an alarm left over from before auto push was turned off.
+    if (!(await getAutoPushSettings()).enabled) {
+      await chrome.alarms.clear(ALARM_NAME);
+      return;
+    }
+    runTrackingPush();
   });
 
-  chrome.runtime.onInstalled.addListener(ensureAlarm);
-  chrome.runtime.onStartup.addListener(ensureAlarm);
-  ensureAlarm();
+  chrome.runtime.onInstalled.addListener(syncTrackingAlarm);
+  chrome.runtime.onStartup.addListener(syncTrackingAlarm);
+  syncTrackingAlarm();
 }

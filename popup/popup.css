@@ -791,3 +791,58 @@ body.light-theme .theme-toggle::after {
 }
 .btn-detect:hover:not(:disabled) { filter: brightness(1.15); }
 .btn-detect:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: default; }
+
+/* ─── Feature switch in the header (Get Orders / Push Tracking) ─── */
+.main-tabs {
+  display: flex; gap: 2px; padding: 3px; margin: 0 auto;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 999px;
+}
+.main-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border: none; border-radius: 999px;
+  background: transparent; color: var(--muted);
+  font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.main-tab:hover:not(.active) { color: var(--text); }
+.main-tab.active { background: var(--accent); color: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
+.tab-panel { display: flex; flex-direction: column; gap: 12px; }
+/* Make room for the feature switch: the main header shows Settings as an icon (title keeps the label). */
+#view-main .header { gap: 10px; }
+#view-main .header-right { gap: 8px; }
+#view-main .theme-toggle { margin-right: 0 !important; }
+#btn-open-settings-main { padding: 7px; }
+#btn-open-settings-main span { display: none; }
+#btn-open-settings-main svg { width: 16px; height: 16px; }
+.feature-head { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.feature-title { font-size: 15px; font-weight: 700; color: var(--text); margin: 0; }
+.feature-sub { font-size: 11.5px; color: var(--muted); }
+
+/* ─── Push Tracking tab ─── */
+.trk-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.trk-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.trk-stat {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.trk-num { font-size: 16px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.trk-cap { font-size: 10.5px; color: var(--muted); text-align: center; }
+.trk-stat.ok .trk-num { color: var(--green); }
+.trk-stat.bad .trk-num { color: var(--red); }
+
+.trk-store { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); }
+.trk-store-name { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trk-store-name.missing { color: var(--red); font-weight: 500; font-size: 12px; white-space: normal; }
+
+/* Push Tracking: setup notice */
+.trk-setup { cursor: default; border-color: #f59e0b; border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.10); }
+.trk-setup:hover { background: rgba(245, 158, 11, 0.10); }
+.trk-setup .setup-banner-title { color: #f59e0b; }
+body.light-theme .trk-setup .setup-banner-title { color: #b45309; }
+.trk-setup-action { align-self: flex-start; padding: 6px 12px; font-size: 12px; }
+.tab-warn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #f59e0b; color: #1a1205; font-size: 11px; font-weight: 800; line-height: 1;
+}
+.trk-setup[hidden], .trk-setup-action[hidden], .tab-warn[hidden] { display: none; }

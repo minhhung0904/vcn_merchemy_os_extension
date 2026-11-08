@@ -1435,11 +1435,11 @@ function bindMainEvents() {
   bindShopifyAutoSyncCard();
 
   // Platform tabs
-  document.querySelectorAll(".platform-tab").forEach((tab) => {
+  document.querySelectorAll("#tab-orders .platform-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       if (tab.classList.contains("active")) return;
       document
-        .querySelectorAll(".platform-tab")
+        .querySelectorAll("#tab-orders .platform-tab")
         .forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       selectedPlatform = tab.dataset.platform;
@@ -2116,40 +2116,356 @@ const storage = {
 };
 
 
+// ─── Main tabs ──────────────────────────────────────────────────────────────
+
+function showMainTab(name) {
+  document.querySelectorAll(".main-tab").forEach((tab) => {
+    const active = tab.dataset.tab === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  getEl("tab-orders").style.display = name === "orders" ? "flex" : "none";
+  getEl("tab-tracking").style.display = name === "tracking" ? "flex" : "none";
+  if (name === "tracking") refreshEtsyTrackingTab();
+}
+
+function bindMainTabs() {
+  document.querySelectorAll(".main-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      showMainTab(tab.dataset.tab);
+      storage.set({ popupMainTab: tab.dataset.tab });
+    });
+  });
+  storage.get(["popupMainTab"]).then(({ popupMainTab }) => {
+    if (popupMainTab === "tracking") showMainTab("tracking");
+    else loadEtsyQueueSummary(); // only to light the ⚠ on the tab when something is missing
+  });
+}
+
 // ─── Etsy tracking push (see etsy-tracking.js) ──────────────────────────────
 
+// Mirrors DEFAULT_AUTO_PUSH in etsy-tracking.js.
+const ETSY_AUTO_PUSH_DEFAULT = { enabled: true, mode: "hourly", time: "00:00", hours: 1, startTime: "00:00" };
+const ETSY_TRACKING_ALARM = "etsyTrackingPush";
+
+async function getEtsyAutoPush() {
+  const { etsyAutoPush } = await storage.get(["etsyAutoPush"]);
+  return { ...ETSY_AUTO_PUSH_DEFAULT, ...(etsyAutoPush || {}) };
+}
+
+function describeEtsyAutoPushSchedule(s) {
+  return s.mode === "daily" ? `Daily at ${s.time}` : `Every ${s.hours}h from ${s.startTime}`;
+}
+
 function describeEtsyTrackingStatus(status) {
-  if (!status) return "Not run yet";
+  if (!status) return { text: "Not run yet", kind: "" };
   const when = new Date(status.time).toLocaleString();
-  if (!status.ok) return `Failed ${when}: ${status.error}`;
-  return `${when} — ${status.pushed} pushed, ${status.already} already on Etsy, ${status.failed} failed`;
+  const how = `${status.manual ? "by hand" : "auto"}${status.storeName ? `, ${status.storeName}` : ""}`;
+  const counts = `${status.pushed || 0} pushed, ${status.already || 0} already on Etsy, ${status.failed || 0} failed`;
+  if (!status.ok) {
+    const done = status.pushed || status.already || status.failed ? ` (${counts} before it stopped)` : "";
+    return { text: `Last run ${when} (${how}) failed: ${status.error}${done}`, kind: "error" };
+  }
+  return {
+    text: `Last run ${when} (${how}): ${counts}${status.stopReason ? `. ${status.stopReason}` : ""}`,
+    kind: status.failed || status.stopReason ? "error" : "success",
+  };
+}
+
+function renderEtsyLastRun(status) {
+  const box = getEl("trk-last-run");
+  const { text, kind } = describeEtsyTrackingStatus(status);
+  getEl("trk-last-run-text").textContent = text;
+  box.classList.remove("success", "error", "loading");
+  if (kind) box.classList.add(kind);
+}
+
+// Display mode of the Auto push card plus the next scheduled run.
+async function renderEtsyAutoPush() {
+  const settings = await getEtsyAutoPush();
+  renderSyncDisplay("-tracking", settings.enabled, describeEtsyAutoPushSchedule(settings));
+
+  const next = getEl("trk-next-run");
+  if (!settings.enabled) {
+    next.textContent = "Off. Tracking is only sent when you click Push now.";
+    return;
+  }
+  const alarm = await chrome.alarms.get(ETSY_TRACKING_ALARM);
+  next.textContent = alarm
+    ? `Next auto push: ${new Date(alarm.scheduledTime).toLocaleString()}`
+    : "Next auto push: scheduling…";
+}
+
+// Editor of the Auto push card, built like the Get Orders Auto-Sync card.
+function bindEtsyAutoPushCard() {
+  const toggle = getEl("toggle-autosync-tracking");
+  const optionsDiv = getEl("autosync-options-tracking");
+  const modeSelect = getEl("sync-mode-tracking");
+  const hoursInput = getEl("sync-hours-tracking");
+  const timeWrap = getEl("sync-time-wrap-tracking");
+  const hoursWrap = getEl("sync-hours-wrap-tracking");
+  const th = getEl("sync-time-h-tracking"), tm = getEl("sync-time-m-tracking");
+  const sh = getEl("sync-start-h-tracking"), sm = getEl("sync-start-m-tracking");
+  const btnSave = getEl("btn-save-sync-tracking");
+  const displayWrapper = getEl("autosync-display-tracking");
+  const editorWrapper = getEl("autosync-editor-tracking");
+
+  [th, sh].forEach((sel) => {
+    sel.innerHTML = "";
+    for (let i = 0; i < 24; i++) sel.add(new Option(String(i).padStart(2, "0"), String(i)));
+  });
+  [tm, sm].forEach((sel) => {
+    sel.innerHTML = "";
+    for (let i = 0; i < 60; i++) {
+      const v = String(i).padStart(2, "0");
+      sel.add(new Option(v, v));
+    }
+  });
+
+  const to24h = (h, m) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const from24h = (str) => {
+    const [hh, mm] = String(str || "00:00").split(":");
+    return { h: String(parseInt(hh, 10) || 0), m: (mm || "00").padStart(2, "0") };
+  };
+  const clampHours = (v) => Math.min(24, Math.max(1, parseInt(v, 10) || 1));
+
+  let saved = null;
+
+  const readForm = () => ({
+    enabled: toggle.checked,
+    mode: modeSelect.value,
+    time: to24h(th.value, tm.value),
+    hours: clampHours(hoursInput.value),
+    startTime: to24h(sh.value, sm.value),
+  });
+
+  const fillForm = (s) => {
+    toggle.checked = s.enabled;
+    modeSelect.value = s.mode === "daily" ? "daily" : "hourly";
+    hoursInput.value = String(s.hours);
+    const t = from24h(s.time); th.value = t.h; tm.value = t.m;
+    const st = from24h(s.startTime); sh.value = st.h; sm.value = st.m;
+    updateUI();
+  };
+
+  const checkChanges = () => {
+    btnSave.disabled = !saved || JSON.stringify(readForm()) === JSON.stringify(saved);
+  };
+
+  function updateUI() {
+    optionsDiv.style.display = toggle.checked ? "block" : "none";
+    const daily = modeSelect.value === "daily";
+    timeWrap.style.display = daily ? "flex" : "none";
+    hoursWrap.style.display = daily ? "none" : "flex";
+    checkChanges();
+  }
+
+  const openEditor = () => {
+    displayWrapper.style.display = "none";
+    editorWrapper.style.display = "flex";
+  };
+  const closeEditor = () => {
+    editorWrapper.style.display = "none";
+    displayWrapper.style.display = "flex";
+  };
+  const isEditing = () => editorWrapper.style.display !== "none";
+
+  async function persist(settings) {
+    await storage.set({ etsyAutoPush: settings });
+    saved = { ...settings };
+    await chrome.runtime.sendMessage({ type: "UPDATE_ETSY_TRACKING_ALARM" }).catch(() => {});
+    await renderEtsyAutoPush();
+    checkChanges();
+  }
+
+  getEl("btn-edit-sync-tracking").addEventListener("click", openEditor);
+  getEl("btn-cancel-sync-tracking").addEventListener("click", () => {
+    if (saved) fillForm(saved);
+    closeEditor();
+  });
+
+  [toggle, modeSelect, hoursInput, th, tm, sh, sm].forEach((el) => {
+    el.addEventListener("change", () => {
+      updateUI();
+      // Like Auto-Sync: the on/off switch is saved at once, the schedule waits for Save.
+      if (el === toggle && saved) persist({ ...saved, enabled: toggle.checked });
+    });
+  });
+  hoursInput.addEventListener("input", checkChanges);
+
+  btnSave.addEventListener("click", async () => {
+    btnSave.disabled = true;
+    btnSave.textContent = "Saving...";
+    const settings = readForm();
+    hoursInput.value = String(settings.hours);
+    await persist(settings);
+    btnSave.innerHTML = "<span>💾</span> Save Settings";
+    checkChanges();
+    closeEditor();
+  });
+
+  getEtsyAutoPush().then((s) => {
+    saved = { ...s };
+    fillForm(s);
+    renderEtsyAutoPush();
+  });
+
+  // Settings changed elsewhere (another popup window): refresh unless the user is editing.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes.etsyAutoPush) return;
+    const next = { ...ETSY_AUTO_PUSH_DEFAULT, ...(changes.etsyAutoPush.newValue || {}) };
+    saved = next;
+    if (!isEditing()) fillForm(next);
+    renderEtsyAutoPush();
+  });
+}
+
+// The first problem found decides what the banner says. `action` = "settings" adds a button.
+function renderEtsyTrackingSetup(issue) {
+  const banner = getEl("trk-setup");
+  getEl("trk-tab-warn").hidden = !issue;
+  banner.hidden = !issue;
+  if (!issue) return;
+  getEl("trk-setup-title").textContent = issue.title;
+  getEl("trk-setup-text").textContent = issue.text;
+  getEl("trk-setup-action").hidden = issue.action !== "settings";
+}
+
+const ETSY_SETUP_TEXT = {
+  401: "Your API Token is invalid or expired. Update it in Settings.",
+  403: "Your API Token cannot push tracking. Use a token of an Admin user that has the orders:status:write scope (Sellfern → Settings → API Tokens), then update it in Settings.",
+  404: "This Sellfern server does not support Etsy tracking push yet.",
+};
+
+function setupIssueFromStatus(status, fallback) {
+  return {
+    title: status === 404 ? "Tracking push is not available" : "API Token needs attention",
+    text: ETSY_SETUP_TEXT[status] || fallback,
+    action: status === 401 || status === 403 ? "settings" : null,
+  };
+}
+
+function renderEtsyTrackingStore(storeName) {
+  const el = getEl("trk-store-name");
+  el.classList.toggle("missing", !storeName);
+  el.textContent = storeName || "Not detected. Open your Etsy shop and click Auto Detect in Get Orders.";
+  el.title = storeName || "";
+  getEl("btn-etsy-push-now").disabled = !storeName;
+}
+
+async function loadEtsyQueueSummary() {
+  const ids = ["pending", "processing", "done", "failed"];
+  const storesEl = getEl("trk-stores");
+  const { apiToken, defaultStore } = await storage.get(["apiToken", "defaultStore"]);
+  const storeName = String(defaultStore || "").trim();
+  renderEtsyTrackingStore(storeName);
+  ids.forEach((s) => { getEl(`trk-count-${s}`).textContent = "–"; });
+  storesEl.textContent = "";
+  if (!apiToken) {
+    renderEtsyTrackingSetup({
+      title: "API Token not configured",
+      text: "Add your Sellfern API Token in Settings. It must belong to an Admin user and have the orders:status:write scope.",
+      action: "settings",
+    });
+    return;
+  }
+  if (!storeName) {
+    renderEtsyTrackingSetup({
+      title: "No Etsy store detected",
+      text: "Open your Etsy shop in this browser, go to the Get Orders tab and click Auto Detect. Tracking is pushed only for that store.",
+    });
+    return;
+  }
+  // A problem the last push ran into (e.g. the token lacks the tracking scope) stays until a push succeeds.
+  const { etsyTrackingSetupIssue } = await storage.get(["etsyTrackingSetupIssue"]);
+  const lastIssue = etsyTrackingSetupIssue?.status
+    ? setupIssueFromStatus(etsyTrackingSetupIssue.status, etsyTrackingSetupIssue.message)
+    : null;
+  storesEl.textContent = "Loading…";
+  try {
+    const query = `storeName=${encodeURIComponent(storeName)}`;
+    const res = await fetch(`${DEFAULT_API_URL}/stores/etsy/tracking-queue/summary?${query}`, {
+      headers: { "x-api-key": apiToken },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw Object.assign(new Error(json?.error?.message || json?.error || `Sellfern API error ${res.status}`), { status: res.status });
+    }
+    const data = json.success && "data" in json ? json.data : json;
+    ids.forEach((s) => { getEl(`trk-count-${s}`).textContent = data.counts?.[s] ?? 0; });
+    const connected = (data.stores || []).length > 0;
+    storesEl.textContent = connected ? "Connected to Etsy with its own app." : "";
+    if (!connected) {
+      renderEtsyTrackingSetup({
+        title: `"${storeName}" is not connected to Etsy`,
+        text: "In Sellfern, go to Settings → Stores, edit this store, choose Use Your Own API Key, enter your Etsy app Keystring and Shared Secret, tick Connect through the Sellfern extension and click Connect. The store name in Sellfern must match the Etsy shop name.",
+      });
+    } else {
+      renderEtsyTrackingSetup(lastIssue);
+    }
+  } catch (err) {
+    ids.forEach((s) => { getEl(`trk-count-${s}`).textContent = "–"; });
+    if (ETSY_SETUP_TEXT[err.status]) {
+      storesEl.textContent = "";
+      renderEtsyTrackingSetup(setupIssueFromStatus(err.status, err.message));
+    } else {
+      storesEl.textContent = `Could not load the queue: ${err.message}`;
+      renderEtsyTrackingSetup(lastIssue);
+    }
+  }
+}
+
+function refreshEtsyTrackingTab() {
+  renderEtsyAutoPush();
+  loadEtsyQueueSummary();
+  storage.get(["etsyTrackingStatus"]).then(({ etsyTrackingStatus }) => renderEtsyLastRun(etsyTrackingStatus));
 }
 
 function bindEtsyTrackingPush() {
-  const button = document.getElementById("set-btn-etsy-push");
-  const statusEl = document.getElementById("set-etsy-push-status");
-  if (!button || !statusEl) return;
+  bindMainTabs();
+  bindEtsyAutoPushCard();
+  getEl("btn-etsy-queue-refresh").addEventListener("click", loadEtsyQueueSummary);
+  getEl("trk-setup-action").addEventListener("click", () => openSettingsView());
 
-  chrome.storage.local.get(["etsyTrackingStatus"], ({ etsyTrackingStatus }) => {
-    statusEl.textContent = describeEtsyTrackingStatus(etsyTrackingStatus);
-  });
-
+  const button = getEl("btn-etsy-push-now");
   button.addEventListener("click", async () => {
     button.disabled = true;
-    statusEl.textContent = "Pushing…";
+    const box = getEl("trk-last-run");
+    box.classList.remove("success", "error");
+    box.classList.add("loading");
+    getEl("trk-last-run-text").textContent = "Pushing… (all waiting tracking numbers of this store, 50 at a time)";
     try {
       const result = await chrome.runtime.sendMessage({ type: "PUSH_ETSY_TRACKING_NOW" });
-      if (!result?.ok) {
-        statusEl.textContent = `Failed: ${result?.error || "unknown error"}`;
-      } else if (result.skipped) {
-        statusEl.textContent = "A push is already running";
-      } else {
-        statusEl.textContent = `${result.pushed} pushed, ${result.already} already on Etsy, ${result.failed} failed`;
+      if (result?.skipped) {
+        box.classList.remove("loading");
+        getEl("trk-last-run-text").textContent = "A push is already running. Try again in a moment.";
+      } else if (!result?.ok && result?.error) {
+        // The background also stores the status; show the error even if it did not.
+        renderEtsyLastRun({ ...result, ok: false, time: Date.now(), manual: true });
       }
     } catch (err) {
-      statusEl.textContent = `Failed: ${err.message}`;
+      renderEtsyLastRun({ ok: false, time: Date.now(), manual: true, error: err.message });
     } finally {
-      button.disabled = false;
+      loadEtsyQueueSummary(); // also re-enables the button when a store is detected
     }
+  });
+
+  // A manual run reports after each batch of 50.
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type !== "ETSY_TRACKING_PROGRESS") return;
+    const box = getEl("trk-last-run");
+    box.classList.remove("success", "error");
+    box.classList.add("loading");
+    getEl("trk-last-run-text").textContent =
+      `Pushing ${msg.storeName}… batch ${msg.batch} done: ${msg.pushed} pushed, ${msg.already} already on Etsy, ${msg.failed} failed`;
+    loadEtsyQueueSummary();
+  });
+
+  // Runs started by the alarm (or another popup) update the tab while it is open.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.etsyTrackingStatus) renderEtsyLastRun(changes.etsyTrackingStatus.newValue);
+    const trackingOpen = getEl("tab-tracking").style.display !== "none";
+    if ((changes.defaultStore || changes.etsyTrackingSetupIssue || changes.apiToken) && trackingOpen) loadEtsyQueueSummary();
   });
 }

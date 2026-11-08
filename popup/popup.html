@@ -15,6 +15,11 @@
         <img src="../icons/icon32.png" alt="Logo" class="logo-icon" />
         <span class="logo-text">Sellfern</span>
       </div>
+      <!-- Feature switch: Get Orders and Push Tracking are two separate tools -->
+      <nav class="main-tabs" role="tablist" aria-label="Features">
+        <button class="main-tab active" type="button" role="tab" data-tab="orders" aria-selected="true" aria-controls="tab-orders" title="Get Orders: Etsy / Shopify → Sellfern"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>Get Orders</span></button>
+        <button class="main-tab" type="button" role="tab" data-tab="tracking" aria-selected="false" aria-controls="tab-tracking" title="Push Tracking: Sellfern → Etsy"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4h13v12H1z"/><path d="M14 8h4l4 4v4h-8z"/><circle cx="5.5" cy="18.5" r="2"/><circle cx="17.5" cy="18.5" r="2"/></svg><span>Push Tracking</span><span class="tab-warn" id="trk-tab-warn" hidden title="Tracking push is not set up">!</span></button>
+      </nav>
       <div class="header-right">
         <label class="theme-toggle" title="Toggle Theme" style="margin-right: 8px;">
           <input type="checkbox" id="btn-theme-toggle">
@@ -39,6 +44,13 @@
       </p>
     </div>
 
+    <!-- Main tabs: getting orders vs pushing tracking back to Etsy -->
+
+    <div class="tab-panel" id="tab-orders" role="tabpanel">
+    <div class="feature-head">
+      <h2 class="feature-title">Get Orders</h2>
+      <span class="feature-sub">Fetch orders from Etsy / Shopify and push them into Sellfern</span>
+    </div>
     <!-- Platform Selector -->
     <section class="section">
       <label class="label">Platform</label>
@@ -366,6 +378,140 @@
       <div class="progress-bar" style="width: 100%;"><div class="progress-fill" id="progress-fill"></div></div>
     </div>
 
+    </div><!-- /tab-orders -->
+
+    <!-- ═══ Push Tracking tab (see etsy-tracking.js) ═══ -->
+    <div class="tab-panel" id="tab-tracking" role="tabpanel" style="display:none;">
+      <div class="feature-head">
+        <h2 class="feature-title">Push Tracking</h2>
+        <span class="feature-sub">Send tracking numbers from Sellfern back to Etsy</span>
+      </div>
+      <!-- Platform Selector: only Etsy can receive tracking for now -->
+      <section class="section">
+        <label class="label">Platform</label>
+        <div class="platform-tabs" id="trk-platform-tabs">
+          <button class="platform-tab active" type="button" data-platform="etsy"><img class="platform-icon" src="../icons/platforms/etsy.svg" alt="" /><span>Etsy</span></button>
+        </div>
+      </section>
+
+      <!-- Shown when something is missing before tracking push can work -->
+      <div class="setup-banner trk-setup" id="trk-setup" hidden>
+        <div class="setup-banner-head">
+          <span class="setup-banner-icon">⚠️</span>
+          <div class="setup-banner-title" id="trk-setup-title">Tracking push is not set up</div>
+        </div>
+        <p class="setup-banner-text" id="trk-setup-text"></p>
+        <button type="button" class="btn btn-secondary trk-setup-action" id="trk-setup-action" hidden>Open Settings</button>
+      </div>
+
+      <div class="trk-store">
+        <span class="label">Store</span>
+        <span class="trk-store-name" id="trk-store-name">—</span>
+      </div>
+      <p class="hint">
+        Sends tracking numbers from Sellfern to Etsy for this store only. The store must be connected with
+        its own Etsy app (Sellfern → Settings → Stores). Chrome must be open.
+      </p>
+
+      <section class="section">
+        <div id="sync-card-tracking" class="sync-card active">
+          <!-- Display Mode -->
+          <div id="autosync-display-tracking" class="sync-display">
+            <div class="sync-display-main">
+              <div class="sync-display-top">
+                <span class="sync-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4h13v12H1z"/><path d="M14 8h4l4 4v4h-8z"/><circle cx="5.5" cy="18.5" r="2"/><circle cx="17.5" cy="18.5" r="2"/></svg></span>
+                <span class="sync-name">Auto push</span>
+              </div>
+              <div class="sync-display-bottom">
+                <span class="sync-state" id="autosync-state-tracking" title="Click Edit to turn Auto push on or off">OFF</span>
+                <span class="sync-divider"></span>
+                <span class="sync-schedule" id="autosync-schedule-tracking"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h7"/><path d="M3 10h18"/><path d="M8 2.5v3"/><path d="M16 2.5v3"/><circle cx="18" cy="18" r="4"/><path d="M18 16.3V18l1.2.8"/></svg><span>Not scheduled</span></span>
+              </div>
+            </div>
+            <button id="btn-edit-sync-tracking" class="sync-edit-btn" type="button" title="Change Auto push settings"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3l4 4L8 20l-5 1 1-5z"/></svg> Edit</button>
+          </div>
+
+          <!-- Editor Mode -->
+          <div id="autosync-editor-tracking" style="display: none; flex-direction: column; gap: 12px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 5px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 14px; font-weight: 500;">Enable Auto push</span>
+              <label class="switch">
+                <input type="checkbox" id="toggle-autosync-tracking">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="sync-options-inner" id="autosync-options-tracking" style="display: none;">
+              <div class="option-row">
+                <label class="option-label" for="sync-mode-tracking">⚡ Frequency</label>
+                <select id="sync-mode-tracking" class="input">
+                  <option value="daily">Daily</option>
+                  <option value="hourly">Hourly</option>
+                </select>
+              </div>
+
+              <div id="sync-time-wrap-tracking" class="option-row" style="margin-top: 10px;">
+                <label class="option-label">🕒 Target Time</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <select id="sync-time-h-tracking" class="input" style="width: 70px;"></select>
+                  <span style="color: var(--muted); font-weight: bold;">:</span>
+                  <select id="sync-time-m-tracking" class="input" style="width: 70px;"></select>
+                </div>
+              </div>
+
+              <div id="sync-hours-wrap-tracking" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
+                <div class="option-row">
+                  <label class="option-label" for="sync-hours-tracking">⏳ Interval (Hours)</label>
+                  <input type="number" id="sync-hours-tracking" class="input" value="1" min="1" max="24" />
+                </div>
+                <div class="option-row">
+                  <label class="option-label">🏁 Start Time</label>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="sync-start-h-tracking" class="input" style="width: 70px;"></select>
+                    <span style="color: var(--muted); font-weight: bold;">:</span>
+                    <select id="sync-start-m-tracking" class="input" style="width: 70px;"></select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 5px;">
+              <button id="btn-cancel-sync-tracking" class="btn btn-secondary btn-full" style="padding: 10px;" type="button">Cancel</button>
+              <button id="btn-save-sync-tracking" class="btn btn-primary btn-full" style="padding: 10px;" type="button" disabled>
+                <span>💾</span> Save Settings
+              </button>
+            </div>
+          </div>
+
+          <span class="hint" id="trk-next-run"></span>
+        </div>
+      </section>
+
+      <section class="section">
+        <label class="label">Push by hand</label>
+        <button class="btn btn-primary btn-full" id="btn-etsy-push-now" type="button"><span>🚚</span> Push now</button>
+      </section>
+
+      <section class="section">
+        <div class="trk-row">
+          <label class="label">Queue for this store</label>
+          <button class="btn-link" id="btn-etsy-queue-refresh" type="button" style="font-size: 11px; padding: 0;">Refresh</button>
+        </div>
+        <div class="trk-stats">
+          <div class="trk-stat"><span class="trk-num" id="trk-count-pending">–</span><span class="trk-cap">Waiting</span></div>
+          <div class="trk-stat"><span class="trk-num" id="trk-count-processing">–</span><span class="trk-cap">In progress</span></div>
+          <div class="trk-stat ok"><span class="trk-num" id="trk-count-done">–</span><span class="trk-cap">Pushed</span></div>
+          <div class="trk-stat bad"><span class="trk-num" id="trk-count-failed">–</span><span class="trk-cap">Failed</span></div>
+        </div>
+        <span class="hint" id="trk-stores"></span>
+      </section>
+
+      <div class="status-box" id="trk-last-run">
+        <span>🕒</span>
+        <span id="trk-last-run-text">Not run yet</span>
+      </div>
+    </div><!-- /tab-tracking -->
+
     <!-- Footer -->
     <footer class="footer" style="display:flex; justify-content:space-between; align-items:center;">
       <span id="api-status">🟢 Connected</span>
@@ -414,15 +560,6 @@
             <span>Flow Studio board</span>
             <span class="token-mask" id="view-board-name" style="font-family: inherit; letter-spacing: 0;">—</span>
           </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <label class="label">Etsy tracking push</label>
-        <span class="hint">Every hour the extension sends new tracking numbers from Sellfern to Etsy for shops connected with their own Etsy app. Chrome must be open.</span>
-        <div class="actions" style="margin-top: 6px;">
-          <button class="btn btn-secondary" id="set-btn-etsy-push" type="button" style="flex: 0 0 auto; padding: 7px 14px;">Push now</button>
-          <span class="conn-status" id="set-etsy-push-status"></span>
         </div>
       </section>
 
