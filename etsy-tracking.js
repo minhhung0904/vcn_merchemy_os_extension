@@ -454,13 +454,8 @@ export async function syncTrackingAlarm({ force = false } = {}) {
 }
 
 export function registerEtsyTracking() {
-  const callbackFilter = { url: [{ hostEquals: ETSY_CALLBACK_HOST, pathEquals: ETSY_CALLBACK_PATH }] };
-
-  chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-    if (details.frameId === 0) handleCallbackNavigation(details.url, details.tabId);
-  }, callbackFilter);
-
-  // Fallback for browsers that skip onBeforeNavigate when the target refuses the connection.
+  // Detect the OAuth callback redirect via tabs.onUpdated (no webNavigation permission needed).
+  // handleCallbackNavigation ignores any URL that is not the Etsy callback.
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const url = changeInfo.url || tab?.pendingUrl || tab?.url;
     if (url) handleCallbackNavigation(url, tabId);
