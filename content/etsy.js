@@ -582,7 +582,9 @@
     const subtotal     = centsToDollars(getV(cost, 'discounted_items_cost', 'discountedItemsCost'));
     const currency     = getV(cost, 'total_cost', 'totalCost')?.currency_code || 'USD';
 
-    const customerName = buyer.name || addr.name || 'Unknown Buyer';
+    // Use the real name on the order (delivery address), not the Etsy account name,
+    // since buyers often set an account name different from their real name.
+    const customerName = addr.name || buyer.name || 'Unknown Buyer';
     const customerEmail = buyer.email || '';
     const shipName     = addr.name || customerName;
     const shipAddress1 = [getV(addr, 'first_line', 'firstLine'), getV(addr, 'second_line', 'secondLine')]
