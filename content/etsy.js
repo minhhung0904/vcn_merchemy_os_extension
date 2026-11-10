@@ -245,9 +245,31 @@
       const text = s.textContent;
       if (!text) continue;
 
+      // Type 0 (authoritative): Common_OrderState objects, e.g.
+      // {"type":"Common_OrderState","order_state_id":1515016361305,...,"name":"New","state_type":"New",...}
+      // These objects contain no nested {}, so they can be matched and JSON-parsed directly.
+      if (text.includes('Common_OrderState')) {
+        const objMatches = text.matchAll(/\{[^{}]*"type"\s*:\s*"Common_OrderState"[^{}]*\}/g);
+        for (const m of objMatches) {
+          try {
+            const s = JSON.parse(m[0]);
+            const id = String(s.order_state_id ?? '');
+            if (!/^\d+$/.test(id) || seenIds.has(id)) continue; // skip "All" (-1)
+            const stateType = String(s.state_type || '');
+            let label = s.name || s.label || id;
+            if (stateType === 'New') label = 'New';
+            else if (stateType === 'Completed') label = 'Completed';
+            states.push({ label, id, stateType });
+            seenIds.add(id);
+          } catch (_) {}
+        }
+      }
+
       // Type 1: Label/Name and ID pair (handles fields in between)
       // Pattern: "name":"New", ..., "order_state_id":123
-      const matches = text.matchAll(/"(?:label|name)"\s*:\s*"([^"]+)"[^}]*?"order_state_id"\s*:\s*"?(\d+)"?/gi);
+      // [^{}\[\]] keeps the match inside a single flat object, so it can't pair an
+      // order's order_state_id with a nested action's "name" (e.g. "ChangeState").
+      const matches = text.matchAll(/"(?:label|name)"\s*:\s*"([^"]+)"[^{}\[\]]*?"order_state_id"\s*:\s*"?(\d+)"?/gi);
       for (const m of matches) {
         const label = m[1];
         const id = m[2];
@@ -258,7 +280,7 @@
       }
 
       // Reverse Pattern: "order_state_id":123, ..., "name":"New"
-      const reverseMatches = text.matchAll(/"order_state_id"\s*:\s*"?(\d+)"?[^}]*?"(?:label|name)"\s*:\s*"([^"]+)"/gi);
+      const reverseMatches = text.matchAll(/"order_state_id"\s*:\s*"?(\d+)"?[^{}\[\]]*?"(?:label|name)"\s*:\s*"([^"]+)"/gi);
       for (const m of reverseMatches) {
         const id = m[1];
         const label = m[2];
