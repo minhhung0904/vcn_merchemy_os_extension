@@ -317,7 +317,7 @@ const NOT_SET_UP_STATUSES = new Set([401, 403, 404]);
 const SETUP_ISSUE_KEY = "etsyTrackingSetupIssue";
 const SETUP_MESSAGES = {
   401: "Your API Token is invalid or expired. Update it in Settings.",
-  403: "Your API Token cannot push tracking. Use a token of an Admin user that has the orders:status:write scope (Sellfern → Settings → API Tokens), then update it in Settings.",
+  403: "Your API Token cannot push tracking. Use a token that has the orders:status:write scope (Sellfern → Settings → API Tokens), then update it in Settings.",
   404: "This Sellfern server does not support Etsy tracking push yet.",
 };
 

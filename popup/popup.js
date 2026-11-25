@@ -2333,7 +2333,7 @@ function renderEtsyTrackingSetup(issue) {
 
 const ETSY_SETUP_TEXT = {
   401: "Your API Token is invalid or expired. Update it in Settings.",
-  403: "Your API Token cannot push tracking. Use a token of an Admin user that has the orders:status:write scope (Sellfern → Settings → API Tokens), then update it in Settings.",
+  403: "Your API Token cannot push tracking. Use a token that has the orders:status:write scope (Sellfern → Settings → API Tokens), then update it in Settings.",
   404: "This Sellfern server does not support Etsy tracking push yet.",
 };
 
@@ -2364,7 +2364,7 @@ async function loadEtsyQueueSummary() {
   if (!apiToken) {
     renderEtsyTrackingSetup({
       title: "API Token not configured",
-      text: "Add your Sellfern API Token in Settings. It must belong to an Admin user and have the orders:status:write scope.",
+      text: "Add your Sellfern API Token in Settings. It must have the orders:status:write scope.",
       action: "settings",
     });
     return;
